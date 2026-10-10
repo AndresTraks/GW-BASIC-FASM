@@ -1,216 +1,200 @@
 ; [ This translation created 10-Feb-83 by Version 4.3 ]
 
-	.RADIX  8		; To be safe
+if @GW_PASS = 1
 
-CSEG	SEGMENT PUBLIC 'CODESG' 
-	ASSUME  CS:CSEG
+include 'OEM.H'
 
-INCLUDE	OEM.H
+; TITLE   SCNDRV  This is the OS independent Screen Driver for GW BASIC
+; SUBTTL  DATA DEFINITIONS - Miscellaneous
 
-	TITLE   SCNDRV  This is the OS independent Screen Driver for GW BASIC
-	SUBTTL  DATA DEFINITIONS - Miscellaneous
+; COMMENT	*
+; 	--------- --- ---- -- ---------
+; 	COPYRIGHT (C) 1982 BY MICROSOFT
+; 	--------- --- ---- -- ---------
 
-COMMENT	*
-	--------- --- ---- -- ---------
-	COPYRIGHT (C) 1982 BY MICROSOFT
-	--------- --- ---- -- ---------
+; 	PROGRAMMER: MARC WILSON
 
-	PROGRAMMER: MARC WILSON
-
-	*
-	INCLUDE	GIO86U
-	.SALL
-	.RADIX	8
+; 	*
+include 'GIO86U'
 
 ;OEM IFNDEFs
-MELCO=0
-CANON=0
+@SCNDRV@_MELCO=0
+@SCNDRV@_CANON=0
 
 ;GENERIC IFNDEF'S:
-TERMSW=0
-HLPEDT=0
-NMPAGE=1			;Number of pages
-NEWCHP=1			;New change page routine
-IBMEOL=IBMLIK			;Clear to EOL for COMPATIBILITY
-IBMCSR=IBMLIK			;IBM COMPATIBILITY for cursor
+@SCNDRV@_TERMSW=0
+@SCNDRV@_HLPEDT=0
+@SCNDRV@_NMPAGE=1  ;Number of pages
+@SCNDRV@_NEWCHP=1  ;New change page routine
+@SCNDRV@_IBMEOL=@IBMLIK  ;Clear to EOL for COMPATIBILITY
+@SCNDRV@_IBMCSR=@IBMLIK  ;IBM COMPATIBILITY for cursor
 
 ;Definition of scroll types
 ; Choice of scroll type is by switch SCROLT.
 ; Switches defined here are used to implement a specific SCROLT type.
 ; If other scroll types are needed then additional SCROLT types should be
 ;   defined here.
-	INVLIN=SCROLT		;Invisible (function key) Line
-	FKFSRL=(SCROLT-1) AND 1	;Clear fkeys/full scroll/rewrite fkeys
-
+	@SCNDRV@_INVLIN=@SCROLT  ;Invisible (function key) Line
+	@SCNDRV@_FKFSRL=(@SCROLT-1) AND 1  ;Clear fkeys/full scroll/rewrite fkeys
 
 ;OTHER GENERIC SWITCHES(OEM SPECIFIC)
-	TXTWDO=0		;list of OEM's which have window setting capability
+	@SCNDRV@_TXTWDO=0  ;list of OEM's which have window setting capability
 
-	SUBTTL  DATA DEFINITIONS - Internal routines(with usage description)
-
+; SUBTTL  DATA DEFINITIONS - Internal routines(with usage description)
 
 ;Entry points
-	PUBLIC	SCNSWI		; Set CRT physical line width
-				;on entry:  AL=width, CL=height
+; PUBLIC	SCNSWI
+;on entry:  AL=width, CL=height
 
-	PUBLIC	SCNCLR		; Clear CRT, Refresh Function Key Display,
-				; Home Graphics and Text Cursors
-				;on entry:  none
+; PUBLIC	SCNCLR
+; Home Graphics and Text Cursors
+;on entry:  none
 
-	PUBLIC	SCNLOC		; Locate cursor on physical screen(1,1 = HOME)
-				;on entry:  AH=column(x), AL=line(y)
+; PUBLIC	SCNLOC
+;on entry:  AH=column(x), AL=line(y)
 
-	PUBLIC	SCNOUT		; Character output at current position
-				;on entry:  AX=character
+; PUBLIC	SCNOUT
+;on entry:  AX=character
 
-	PUBLIC	SCNRDL		; Read a physical line at current position
-				;on entry:  DI=address of where to put string, CX=max count
-				;on exit:   CX=CX-number of characters read
-				;           DI=DI+number of characters read
+; PUBLIC	SCNRDL
+;on entry:  DI=address of where to put string, CX=max count
+;on exit:   CX=CX-number of characters read
+;           DI=DI+number of characters read
 
+; PUBLIC	SCNPOS
+;on exit:   DL=cursor line, DH=cursor column
 
-	PUBLIC	SCNPOS		; Return current cursor location
-				;on exit:   DL=cursor line, DH=cursor column
+; PUBLIC	SCNRDT
+;on entry:  DL=line number
+;on exit:   AH= terminator column, AL=terminator value
+;           Flags indicate terminator value:
+;           CF=EOL, ZF=Linefeed
 
-	PUBLIC	SCNRDT		; Read terminator for physical line
-				;on entry:  DL=line number
-				;on exit:   AH= terminator column, AL=terminator value
-				;           Flags indicate terminator value:
-				;           CF=EOL, ZF=Linefeed
+; PUBLIC	SCNGWI
+;on exit:   AH=logical width of lines
 
-	PUBLIC	SCNGWI		; Read logical width of lines
-				;on exit:   AH=logical width of lines
+; PUBLIC	SCNMRK
+;on entry:  ZF set indicates use WDOLFT as column
+;           ZF clear indicates use CSRX as column
 
-	PUBLIC	SCNMRK		; Mark position as current FSTPOS, LSTPOS
-				;on entry:  ZF set indicates use WDOLFT as column
-				;           ZF clear indicates use CSRX as column
+; PUBLIC	SCNIPL
 
-	PUBLIC	SCNIPL		; Initialize - called during IPL
-
-	PUBLIC	SCNBRK		; Initialize - called when BREAK received by POLKEY
-	SUBTTL  DATA DEFINITIONS - External routines and data
-
-
+; PUBLIC	SCNBRK
+; SUBTTL  DATA DEFINITIONS - External routines and data
 
 ;EXTERNAL ROUTINES
-	EXTRN	SCROLL:NEAR	; OEM supplied SCROLL routine
-	EXTRN	SCROUT:NEAR	; OEM supplied character output
-	EXTRN	SCRINP:NEAR	; OEM supplied screen input(read character)
-	EXTRN	CLREOL:NEAR	; OEM supplied screen clear to end of line
+; EXTRN	SCROLL:NEAR
+; EXTRN	SCROUT:NEAR
+; EXTRN	SCRINP:NEAR
+; EXTRN	CLREOL:NEAR
 
 ;THE FOLLOWING IS DATA UNIQUE TO THE SCNDRV MODULE
 ;       ALL DATA IS ONE BYTE LONG UNLESS STATED OTHERWISE
-DSEG	SEGMENT PUBLIC 'DATASG'		
-	ASSUME DS:DSEG
-	EXTRN	LINCNT:WORD	; Number of lines
-	EXTRN	CRTWID:WORD	; Characters per line
-	EXTRN	WDOTOP:WORD	; Top line in window(1-[LINCNT])
-	EXTRN	WDOBOT:WORD	; Bottom line in window([WDOTOP]-[LINCNT])
-	EXTRN	WDOLFT:WORD	; Leftmost column in window(1-[CRTWID])
-	EXTRN	WDORGT:WORD	; Rightmost column plus one([WDOLFT]-[LINCNT])
-	EXTRN	LINLEN:WORD	; Line max width(1 to CRTWID)
-	EXTRN	LINTTB:WORD	; Line terminator table((# lines * 2) bytes long)
-				; Two items per entry:
-				;   Terminator, last column
-	EXTRN	TRMCUR:WORD	; Address of current terminator entry(2 bytes)
-	EXTRN	FSTLIN:WORD	; Line number saved by SCNSTM call
-	EXTRN	FSTCOL:WORD	; Column saved as above and decreases to WDOLFT
-	EXTRN	LSTLIN:WORD	; Line number saved by SCNSTM and grows as the
-				;   logical line grows.
-	EXTRN	LSTCOL:WORD	; Column saved as above which grows as the logical
-				;   line grows(always reflects last col on LSTLIN).
-	EXTRN	F_CRET:WORD	; Zero indicates last character output was CR
-	EXTRN	CSRY:WORD	; Current line(1-[LINCNT])
-	EXTRN	CSRX:WORD	; Current column(1-[CRTWID])
-	EXTRN	KEYSW:WORD	; ^O377=Function Keys displayed on bottom line
+end if
+; EXTRN	LINCNT:WORD
+; EXTRN	CRTWID:WORD
+; EXTRN	WDOTOP:WORD
+; EXTRN	WDOBOT:WORD
+; EXTRN	WDOLFT:WORD
+; EXTRN	WDORGT:WORD
+; EXTRN	LINLEN:WORD
+; EXTRN	LINTTB:WORD
+; Two items per entry:
+;   Terminator, last column
+; EXTRN	TRMCUR:WORD
+; EXTRN	FSTLIN:WORD
+; EXTRN	FSTCOL:WORD
+; EXTRN	LSTLIN:WORD
+;   logical line grows.
+; EXTRN	LSTCOL:WORD
+;   line grows(always reflects last col on LSTLIN).
+; EXTRN	F_CRET:WORD
+; EXTRN	CSRY:WORD
+; EXTRN	CSRX:WORD
+; EXTRN	KEYSW:WORD
 
 ;THE FOLLOWING DATA IS ACCESSED BY SCNDRV BUT SET ELSEWHERE
-	EXTRN	F_EDIT:WORD	; Set to non-zero by INLIN when editing
-	EXTRN	F_INST:WORD	; Set to non-zero by INLIN for insert mode
-DSEG	ENDS
-	SUBTTL  DATA DEFINITIONS - Literals
-
-
+; EXTRN	F_EDIT:WORD
+; EXTRN	F_INST:WORD
+if @GW_PASS = 1
+; SUBTTL  DATA DEFINITIONS - Literals
 
 ;CHARACTER DEFINITIONS
-;
-	CHREDT=1		; EDiT
-	CHRBKW=2		; BacK Word
-	CHRCAN=3		; CANcel
-	CHRHCN=4		; Hard CaNcel
-	CHRCLE=5		; CLear to End of line
-	CHRFDW=6		; ForwarD Word
-	CHRBEL=7		; BELl
-	CHRBAK=8D		; BAcKspace
-	CHRTAB=9D		; TAB
-	CHRLNF=10D		; LiNeFeed
-	CHRHOM=11D		; HOMe
-	CHRERA=12D		; ERAse
-	CHRRET=13D		; RETurn
-	CHRAPP=14D		; APPend
-	CHRINS=18D		; INSert
-	CHRFKD=20D		; Function Key Display key
-	CHRLDL=21D		; Line DeLete
-	CHRADV=28D		; cursor RiGhT
-	CHRREG=29D		; cursor LeFT
-	CHRUP=30D		; cursor UP
-	CHRDWN=31D		; cursor DoWN
-	CHRDEL=127D		; DELete
+
+	@SCNDRV@_CHREDT=1  ; EDiT
+	@SCNDRV@_CHRBKW=2  ; BacK Word
+	@SCNDRV@_CHRCAN=3  ; CANcel
+	@SCNDRV@_CHRHCN=4  ; Hard CaNcel
+	@SCNDRV@_CHRCLE=5  ; CLear to End of line
+	@SCNDRV@_CHRFDW=6  ; ForwarD Word
+	@SCNDRV@_CHRBEL=7  ; BELl
+	@SCNDRV@_CHRBAK=8  ; BAcKspace
+	@SCNDRV@_CHRTAB=9  ; TAB
+	@SCNDRV@_CHRLNF=10  ; LiNeFeed
+	@SCNDRV@_CHRHOM=11  ; HOMe
+	@SCNDRV@_CHRERA=12  ; ERAse
+	@SCNDRV@_CHRRET=13  ; RETurn
+	@SCNDRV@_CHRAPP=14  ; APPend
+	@SCNDRV@_CHRINS=18  ; INSert
+	@SCNDRV@_CHRFKD=20  ; Function Key Display key
+	@SCNDRV@_CHRLDL=21  ; Line DeLete
+	@SCNDRV@_CHRADV=28  ; cursor RiGhT
+	@SCNDRV@_CHRREG=29  ; cursor LeFT
+	@SCNDRV@_CHRUP=30  ; cursor UP
+	@SCNDRV@_CHRDWN=31  ; cursor DoWN
+	@SCNDRV@_CHRDEL=127  ; DELete
 
 ;TERMINATOR TABLE LITERALS
-PUBLIC	TRMLNF
-	TRMLNF=10D		; LINEFEED terminator
-PUBLIC	TRMEOL
-	TRMEOL=177O		; EOL terminator
-PUBLIC	TRMWRP
-	TRMWRP=0		; WRAP terminator
-PUBLIC	TRMNWP
-	TRMNWP=1		; NULL WRAP terminator
-PUBLIC	TRMNUL
-	TRMNUL=200O		; Sign bit indicates initialize line
+; PUBLIC	TRMLNF
+	@TRMLNF=10  ; LINEFEED terminator
+; PUBLIC	TRMEOL
+	@TRMEOL=127  ; EOL terminator
+; PUBLIC	TRMWRP
+	@TRMWRP=0  ; WRAP terminator
+; PUBLIC	TRMNWP
+	@TRMNWP=1  ; NULL WRAP terminator
+; PUBLIC	TRMNUL
+	@TRMNUL=128  ; Sign bit indicates initialize line
 
 ;DEFAULT SCREEN SIZE
-PUBLIC	SCNSIZ
-	SCNSIZ=20D+(40D*400O)	; Height = 20, Width = 40
+; PUBLIC	SCNSIZ
+	@SCNSIZ=20+(40*256)  ; Height = 20, Width = 40
 
-	SUBTTL  SCNIPL, SCNSWI AND SCNWDO   The parameter setting routines
-
-
+; SUBTTL  SCNIPL, SCNSWI AND SCNWDO   The parameter setting routines
 
 ;SUBROUTINE SCNIPL():           ; Initialize
 ;**
-SCNIPL:
-DSEG	SEGMENT PUBLIC 'DATASG'
-	EXTRN	ESCFLG:WORD
-DSEG	ENDS
-	MOV	BYTE PTR ESCFLG,LOW 0
-	RET	
+@SCNIPL:
+end if
+; EXTRN	ESCFLG:WORD
+if @GW_PASS = 1
+	MOV	byte [@ESCFLG],((0) and 0FFh)
+	RET
 ;** END SUBROUTINE SCNIPL
 
 ;BREAK - reset flags etc. when ^C typed.
-;
-SCNBRK:	MOV	BYTE PTR FSTLIN,LOW 0
-	MOV	BYTE PTR LSTLIN,LOW 377O	; Set FSTPOS, LSTPOS to impossible values
-	MOV	BYTE PTR F_CRET,LOW 377O	; Clear "last char was CR" flag
-	RET	
+
+@SCNBRK:	MOV	byte [@FSTLIN],((0) and 0FFh)
+	MOV	byte [@LSTLIN],((255) and 0FFh)  ; Set FSTPOS, LSTPOS to impossible values
+	MOV	byte [@F_CRET],((255) and 0FFh)  ; Clear "last char was CR" flag
+	RET
 
 ;SUBROUTINE SCNSWI(WIDTH,HEIGHT):       ; Set screen width(logical/physical) and height
 ;**                     on entry:   AL=width, CL=height
 ;**
-SCNSWI:	MOV	BYTE PTR CRTWID,AL	; Save physical width
-	MOV	BYTE PTR LINLEN,AL	; Set logical line length
-	MOV	BYTE PTR LINCNT,CL	; Save physical height
-	MOV	BYTE PTR WDOTOP,LOW 1	; Init window top
+@SCNSWI:	MOV	byte [@CRTWID],AL  ; Save physical width
+	MOV	byte [@LINLEN],AL  ; Set logical line length
+	MOV	byte [@LINCNT],CL  ; Save physical height
+	MOV	byte [@WDOTOP],((1) and 0FFh)  ; Init window top
 	PUSH	CX
-	DEC	CL		; Reserve status line
-	MOV	BYTE PTR WDOBOT,CL	; Set window bottom
+	DEC	CL  ; Reserve status line
+	MOV	byte [@WDOBOT],CL  ; Set window bottom
 	POP	CX
-	MOV	BYTE PTR WDOLFT,LOW 1	; Set window left
-	MOV	BYTE PTR WDORGT,AL	; Set window right
-	RET	
+	MOV	byte [@WDOLFT],((1) and 0FFh)  ; Set window left
+	MOV	byte [@WDORGT],AL  ; Set window right
+	RET
 ;** *** END
 ;** END SUBROUTINE SCNSWI
-
 
 ;SUBROUTINE SCNWDO(POSN,COUNT): ; Set text window
 ;**
@@ -222,51 +206,48 @@ SCNSWI:	MOV	BYTE PTR CRTWID,AL	; Save physical width
 ;**                             NOTE: This routine truncates width and height.
 ;**
 ;** IF POSN IS CONTAINED WITHIN PHYSICAL SCREEN BEGIN
-	SUBTTL CURSOR READ/WRITE
-
-
+; SUBTTL CURSOR READ/WRITE
 
 ;SUBROUTINE SCNLOC(X,Y):        ; Locate cursor on physical screen
 ;**                         on entry:   AH=column, AL=line(1,1 is home)
 ;**
-SCNLOC:	MOV	BYTE PTR CSRX,AH
-	MOV	BYTE PTR CSRY,AL
-	RET	
+@SCNLOC:	MOV	byte [@CSRX],AH
+	MOV	byte [@CSRY],AL
+	RET
 ;** END SUBROUTINE SCNLOC
 
 ;SUBROUTINE SCNCLR(X,Y):        ; Clear Screen, Home Text & Graphics Cursor,
 ;                               ; Refresh Function Key Display
 ;**                         on entry:
-;
-	EXTRN	KEYDSP:NEAR,GRPINI:NEAR
-SCNCLR:
-	CALL	TTBINI		;Clear the terminator table
-	CALL	GRPINI		;Home the graphics cursor
-	CALL	WHOME		;DX=cursor home
+
+; EXTRN	KEYDSP:NEAR,GRPINI:NEAR
+@SCNCLR:
+	CALL	@SCNDRV@_TTBINI  ;Clear the terminator table
+	CALL	@GRPINI  ;Home the graphics cursor
+	CALL	@SCNDRV@_WHOME  ;DX=cursor home
 	MOV	AX,DX
-	CALL	SCNLOC		;set cursor position
-	JMP	KEYDSP		;Conditionally display softkeys and return
+	CALL	@SCNLOC  ;set cursor position
+	JMP	@KEYDSP  ;Conditionally display softkeys and return
 ;** END SUBROUTINE SCNCLR
 
 ;SUBROUTINE SCNPOS              ; Read current cursor location
-SCNPOS:	MOV	DH,BYTE PTR CSRX
-	MOV	DL,BYTE PTR CSRY
-	PUSHF	
-	CMP	DH,BYTE PTR LINLEN
-	JBE	SCNPS1		;BRIF not beyond edge of screen
-	MOV	DH,BYTE PTR LINLEN	;Force posn within screen
-SCNPS1:	POPF	
-	RET	
+@SCNPOS:	MOV	DH,byte [@CSRX]
+	MOV	DL,byte [@CSRY]
+	PUSHF
+	CMP	DH,byte [@LINLEN]
+	JBE	@SCNDRV@_SCNPS1  ;BRIF not beyond edge of screen
+	MOV	DH,byte [@LINLEN]  ;Force posn within screen
+@SCNDRV@_SCNPS1:	POPF
+	RET
 ;** END SUBROUTINE SCNPOS
 
 ;SUBROUTINE SCNGWI              ; Read current logical width
 ;**                         on exit:    AH=width
 ;**
-SCNGWI:	MOV	AH,BYTE PTR LINLEN
-	RET	
+@SCNGWI:	MOV	AH,byte [@LINLEN]
+	RET
 ;** END SUBROUTINE SCNGWI
-	SUBTTL  TERMINATOR TABLE READ/WRITE/INITIALIZE
-
+; SUBTTL  TERMINATOR TABLE READ/WRITE/INITIALIZE
 
 ;SUBROUTINE SCNRDT(Y):          ; Read terminator value and column
 ;**                         on entry:   DL=line number
@@ -274,99 +255,94 @@ SCNGWI:	MOV	AH,BYTE PTR LINLEN
 ;**                                     If CF=1; EOL
 ;**                                     If CF=0 and ZF=1; LF terminated
 ;**
-SCNRDT:	PUSH	BX
-	MOV	BL,DL		; BX = Displacement into table
+@SCNRDT:	PUSH	BX
+	MOV	BL,DL  ; BX = Displacement into table
 	ADD	BL,BL
-	MOV	BH,LOW 0
-	MOV	WORD PTR TRMCUR,BX	; Save address of terminator reading(for set term)
-	MOV	AH,BYTE PTR LINTTB-2[BX]	; Get terminator posn
-	MOV	AL,BYTE PTR LINTTB-1[BX]	; Get terminator value
-	AND	AL,LOW OFFSET 377O-TRMNUL	; Get rid of initialize line status bit
-	CMP	AL,LOW OFFSET TRMEOL
-	STC	
-	JZ	SCNRTX		; BRIF EOL terminator(CF=1)
-	CMP	AL,LOW OFFSET TRMLNF	; CF=0, set ZF if linefeed terminated
-	JNB	SCNRTX		; BRIF carry not set
-	CMC			; clear carry
-SCNRTX:	POP	BX
-	RET	
+	MOV	BH,((0) and 0FFh)
+	MOV	word [@TRMCUR],BX  ; Save address of terminator reading(for set term)
+	MOV	AH,byte [@LINTTB-2+BX]  ; Get terminator posn
+	MOV	AL,byte [@LINTTB-1+BX]  ; Get terminator value
+	AND	AL,((255-@TRMNUL) and 0FFh)  ; Get rid of initialize line status bit
+	CMP	AL,((@TRMEOL) and 0FFh)
+	STC
+	JZ	@SCNDRV@_SCNRTX  ; BRIF EOL terminator(CF=1)
+	CMP	AL,((@TRMLNF) and 0FFh)  ; CF=0, set ZF if linefeed terminated
+	JNB	@SCNDRV@_SCNRTX  ; BRIF carry not set
+	CMC  ; clear carry
+@SCNDRV@_SCNRTX:	POP	BX
+	RET
 ;** END SUBROUTINE SCNRDT
-
 
 ;SUBROUTINE SCNWTT(TERM)        ; Set new value for terminator last read
 ;**                     on entry:   AH=column where physical line ends
 ;**                                 AL=terminator type(one of: TRMEOL, TRMLNF
 ;**                                     TRMWRP, TRMNWP)
 ;**
-SCNWTT:	PUSH	BX
-	MOV	BX,WORD PTR TRMCUR	; Get address of terminator last read
-	MOV	BYTE PTR LINTTB-2[BX],AH
-	AND	BYTE PTR LINTTB-1[BX],LOW OFFSET TRMNUL
-	OR	BYTE PTR LINTTB-1[BX],AL	; Write new terminator, leaving NULL bit
+@SCNDRV@_SCNWTT:	PUSH	BX
+	MOV	BX,word [@TRMCUR]  ; Get address of terminator last read
+	MOV	byte [@LINTTB-2+BX],AH
+	AND	byte [@LINTTB-1+BX],((@TRMNUL) and 0FFh)
+	OR	byte [@LINTTB-1+BX],AL  ; Write new terminator, leaving NULL bit
 	POP	BX
-	RET	
+	RET
 ;** END SUBROUTINE SCNWTT
 
 ;TERMINATOR TABLE INIT
-;
-TTBINI:	MOV	CX,OFFSET NMLINE+1	; CX=count of line term table entries
-	MOV	BX,OFFSET LINTTB	; BX=addr of line term table
-TTBIN0:	MOV	BYTE PTR 0[BX],LOW 0	; Clear column number
-	MOV	BYTE PTR 1[BX],LOW OFFSET TRMEOL	; Set terminator to <CR>
+
+@SCNDRV@_TTBINI:	MOV	CX,@NMLINE+1  ; CX=count of line term table entries
+	MOV	BX,@LINTTB  ; BX=addr of line term table
+@SCNDRV@_TTBIN0:	MOV	byte [BX+0],((0) and 0FFh)  ; Clear column number
+	MOV	byte [BX+1],((@TRMEOL) and 0FFh)  ; Set terminator to <CR>
 	INC	BX
 	INC	BX
-	LOOP	TTBIN0		; Init entire line terminator table
-	RET	
-	SUBTTL  CHARACTER OUTPUT
-
-
+	LOOP	@SCNDRV@_TTBIN0  ; Init entire line terminator table
+	RET
+; SUBTTL  CHARACTER OUTPUT
 
 ;SUBROUTINE SCNOUT(CHAR):       ; Output character
 ;**                         on entry:   AX= character
 ;**
 
-SCNOUT:	PUSH	DX
+@SCNOUT:	PUSH	DX
 	PUSH	CX
 	PUSH	BX
-	CALL	CTLDSP		; If control char or ESC sequence, do operation
-	JB	SCNOTX		; No char to output
-	CALL	CHWRAP		; Do wrap for char in AX, return DX=posn for output
-	EXTRN	SETCSR:NEAR
-DSEG	SEGMENT PUBLIC 'DATASG'
-	EXTRN	CSRTYP:WORD
-DSEG	ENDS
-	MOV	BYTE PTR CSRTYP,LOW 0D	; Set next cursor type to off
-	CALL	SETCSR		; Insure that the cursor is off
+	CALL	@SCNDRV@_CTLDSP  ; If control char or ESC sequence, do operation
+	JB	@SCNDRV@_SCNOTX  ; No char to output
+	CALL	@SCNDRV@_CHWRAP  ; Do wrap for char in AX, return DX=posn for output
+; EXTRN	SETCSR:NEAR
+end if
+; EXTRN	CSRTYP:WORD
+if @GW_PASS = 1
+	MOV	byte [@CSRTYP],((0) and 0FFh)  ; Set next cursor type to off
+	CALL	@SETCSR  ; Insure that the cursor is off
 
-	CALL	SCROUT		; Send char in AX to BIOS at DX posn
-	MOV	BYTE PTR F_CRET,LOW 377O	; Clear last char was Carriage return flag
-SCNOTX:	POP	BX
+	CALL	@SCROUT  ; Send char in AX to BIOS at DX posn
+	MOV	byte [@F_CRET],((255) and 0FFh)  ; Clear last char was Carriage return flag
+@SCNDRV@_SCNOTX:	POP	BX
 	POP	CX
 	POP	DX
-	RET	
+	RET
 ;** END SUBROUTINE SCNOUT
 
 ;SUBROUTINE MKRMCI              ; Open up sapce for char if insert mode
-;
-MKRMCI:	PUSHF	
-	TEST	BYTE PTR F_INST,LOW 377O
-	JZ	MKRCIX		; BRIF not insert mode(do nothing)
-	POPF	
+
+@SCNDRV@_MKRMCI:	PUSHF
+	TEST	byte [@F_INST],((255) and 0FFh)
+	JZ	@SCNDRV@_MKRCIX  ; BRIF not insert mode(do nothing)
+	POPF
 	MOV	CH,AL
-	INC	CH		; CH=space needed
-	CALL	MKRMCH		; Open up space at (DH,DL) for count of CH
-	CALL	SCNRDX		; Put terminator table values in CX
-	RET	
-MKRCIX:	POPF	
-	RET	
+	INC	CH  ; CH=space needed
+	CALL	@SCNDRV@_MKRMCH  ; Open up space at (DH,DL) for count of CH
+	CALL	@SCNDRV@_SCNRDX  ; Put terminator table values in CX
+	RET
+@SCNDRV@_MKRCIX:	POPF
+	RET
 
-SCNRDX:	XCHG	AX,CX
-	CALL	SCNRDT
+@SCNDRV@_SCNRDX:	XCHG	AX,CX
+	CALL	@SCNRDT
 	XCHG	AX,CX
-	RET	
-	SUBTTL  LINE WRAP LOGIC - Character wrap
-
-
+	RET
+; SUBTTL  LINE WRAP LOGIC - Character wrap
 
 ;THE LINE WRAP LOGIC IS USED PRIOR TO OUTPUTTING CHARACTERS OR STRINGS
 ;   IT WILL RESERVE THE NECESSARY NUMBER OF CHARACTERS ON THE CURRENT
@@ -382,425 +358,417 @@ SCNRDX:	XCHG	AX,CX
 ;**                     NOTE: if CF=1 then DX may be set to a previous posn
 ;**                         where there is enough room to EOL.
 ;**
-CHWRAP:	PUSH	AX
+@SCNDRV@_CHWRAP:	PUSH	AX
 	XOR	CH,CH
 	OR	AH,AH
-	JZ	CHWRP0		; BRIF Single byte character
-	MOV	CH,LOW 1	; It's two byte character
-CHWRP0:	MOV	CL,CH
-	ADD	CH,DH		; CH=column after char is output
-	CALL	SCNRDT		; Read terminator
+	JZ	@SCNDRV@_CHWRP0  ; BRIF Single byte character
+	MOV	CH,((1) and 0FFh)  ; It's two byte character
+@SCNDRV@_CHWRP0:	MOV	CL,CH
+	ADD	CH,DH  ; CH=column after char is output
+	CALL	@SCNRDT  ; Read terminator
 	XCHG	CX,AX
 ;** IF POSN .LT. EOL BEGIN
 ;** AT THIS POINT AH=POSN(WHERE GOING TO), DX=CURRENT POSN,
 ;** AL=LENGTH OF CHARACTER, CX=CURRENT TERMINATORS
-	PUSHF	
-	CMP	AH,BYTE PTR LINLEN
-	JA	CHWRP1		; BRIF not space before end of physical line
-	POPF	
-	CALL	MKRMCI		; If insert mode, open up space for character
+	PUSHF
+	CMP	AH,byte [@LINLEN]
+	JA	@SCNDRV@_CHWRP1  ; BRIF not space before end of physical line
+	POPF
+	CALL	@SCNDRV@_MKRMCI  ; If insert mode, open up space for character
 ;** *** IF NOT(LINEFEED .EQ. TERMINATOR(CURRENT_LINE) AND POSN .EQ. LINLEN)
 ;** *** *** RETURN, OUTPUT IS AT CURRENT POSN
-	JB	CHWPXI		; EOL terminated, output at current posn
-	JZ	CHWPLF		; BRIF LF terminated
-	CMP	CL,LOW OFFSET TRMWRP
-	JZ	CHWPXI		; BRIF WRAP(always room)
-	CMP	AH,BYTE PTR LINLEN
-	JB	CHWPXI		; BRIF NUL_WRAP and not overwriting NULL
-	MOV	CL,LOW OFFSET TRMWRP
-CHWPXI:	JMP	CHWRPX		; Overwriting NULL_WRAP, set to WRAP
-CHWPLF:	CMP	AH,BYTE PTR LINLEN
-	JAE	CHWPL1		; LF terminated and no room for LF
-	INC	AH		; Need to terminate at one past posn printing at
+	JB	@SCNDRV@_CHWPXI  ; EOL terminated, output at current posn
+	JZ	@SCNDRV@_CHWPLF  ; BRIF LF terminated
+	CMP	CL,((@TRMWRP) and 0FFh)
+	JZ	@SCNDRV@_CHWPXI  ; BRIF WRAP(always room)
+	CMP	AH,byte [@LINLEN]
+	JB	@SCNDRV@_CHWPXI  ; BRIF NUL_WRAP and not overwriting NULL
+	MOV	CL,((@TRMWRP) and 0FFh)
+@SCNDRV@_CHWPXI:	JMP	@SCNDRV@_CHWRPX  ; Overwriting NULL_WRAP, set to WRAP
+@SCNDRV@_CHWPLF:	CMP	AH,byte [@LINLEN]
+	JAE	@SCNDRV@_CHWPL1  ; LF terminated and no room for LF
+	INC	AH  ; Need to terminate at one past posn printing at
 	XCHG	AX,CX
 	CMP	AH,CH
 	MOV	AH,CH
-	JA	CHWPL0		; BRIF current posn below terinator posn
-	CALL	SCNWTT		; Terminate line at one more than print posn
-CHWPL0:	CLC	
+	JA	@SCNDRV@_CHWPL0  ; BRIF current posn below terinator posn
+	CALL	@SCNDRV@_SCNWTT  ; Terminate line at one more than print posn
+@SCNDRV@_CHWPL0:	CLC
 	XCHG	AX,CX
-	PUSHF	
-	DEC	AH		; Restore column actually printing at
-	JMP	CHWRP9		; Update LSTPOS, FSTPOS, cursor posn, exit
+	PUSHF
+	DEC	AH  ; Restore column actually printing at
+	JMP	@SCNDRV@_CHWRP9  ; Update LSTPOS, FSTPOS, cursor posn, exit
 ;** *** *** ELSE MOVE LINEFEED TO NEXT LINE
-CHWPL1:	CALL	WRAPLF		; Move linefeed to next line
-	JB	CHWRNI		; Error, output at posn-(char length)
-	CLC	
-	PUSHF	
+@SCNDRV@_CHWPL1:	CALL	@SCNDRV@_WRAPLF  ; Move linefeed to next line
+	JB	@SCNDRV@_CHWRNI  ; Error, output at posn-(char length)
+	CLC
+	PUSHF
 	MOV	AH,CH
-	JMP	CHWRP9		; Exit without updating terminator
-CHWRNI:	JMP	CHWRNO
+	JMP	@SCNDRV@_CHWRP9  ; Exit without updating terminator
+@SCNDRV@_CHWRNI:	JMP	@SCNDRV@_CHWRNO
 ;** *** END
 
 ;** *** DO CASE TERMINATOR(CURRENT_LINE) OF
 ;** *** There is not enough room on current line for character
-CHWRP1:	POPF	
-	JB	CHWREL		; BRIF EOL terminated
-	JZ	CHWRLF		; BRIF LF terminated
+@SCNDRV@_CHWRP1:	POPF
+	JB	@SCNDRV@_CHWREL  ; BRIF EOL terminated
+	JZ	@SCNDRV@_CHWRLF  ; BRIF LF terminated
 ;** *** CASE: WRAP; NULL_WRAP; BEGIN
 ;** *** *** *** SET WRAP TERMINATOR
-CHWRWP:	MOV	CL,LOW OFFSET TRMWRP
-	MOV	CH,BYTE PTR LINLEN
+@SCNDRV@_CHWRWP:	MOV	CL,((@TRMWRP) and 0FFh)
+	MOV	CH,byte [@LINLEN]
 	XCHG	AX,CX
-	CALL	SCNWTT		; Set wrap terminator at last column
-	CMP	DL,BYTE PTR LSTLIN
-	JNZ	CHWRN0		; BRIF not on last line
-	INC	BYTE PTR LSTLIN	; Wrap LSTLIN
-	MOV	BYTE PTR LSTCOL,LOW 0	; Force update of LSTCOL at CHWRPZ
-CHWRN0:	INC	DL		; Next line
-	CALL	SCNRDT		; Set up for write at new line
-	MOV	DH,BYTE PTR WDOLFT	; First column is output posn
+	CALL	@SCNDRV@_SCNWTT  ; Set wrap terminator at last column
+	CMP	DL,byte [@LSTLIN]
+	JNZ	@SCNDRV@_CHWRN0  ; BRIF not on last line
+	INC	byte [@LSTLIN]  ; Wrap LSTLIN
+	MOV	byte [@LSTCOL],((0) and 0FFh)  ; Force update of LSTCOL at CHWRPZ
+@SCNDRV@_CHWRN0:	INC	DL  ; Next line
+	CALL	@SCNRDT  ; Set up for write at new line
+	MOV	DH,byte [@WDOLFT]  ; First column is output posn
 	MOV	CH,DH
-	ADD	CH,CL		; CH=POSN going to
+	ADD	CH,CL  ; CH=POSN going to
 	XCHG	AX,CX
-	CALL	MKRMCI		; If insert mode, open up space for character
-	CMP	CL,LOW OFFSET TRMLNF
-	JNZ	CHWRPX		; BRIF not linefeed terminated
-	XCHG	AX,CX		; CH=POSN, AX=current terminators
-	INC	CH		; Need terminator one beyond actual output
+	CALL	@SCNDRV@_MKRMCI  ; If insert mode, open up space for character
+	CMP	CL,((@TRMLNF) and 0FFh)
+	JNZ	@SCNDRV@_CHWRPX  ; BRIF not linefeed terminated
+	XCHG	AX,CX  ; CH=POSN, AX=current terminators
+	INC	CH  ; Need terminator one beyond actual output
 	CMP	AH,CH
 	MOV	AH,CH
-	JA	CHWRN2		; BRIF Current terminator beyond posn for output
-	CALL	SCNWTT		; Set current terminator to new max posn
-CHWRN2:	DEC	CH		; Restore POSN going to
+	JA	@SCNDRV@_CHWRN2  ; BRIF Current terminator beyond posn for output
+	CALL	@SCNDRV@_SCNWTT  ; Set current terminator to new max posn
+@SCNDRV@_CHWRN2:	DEC	CH  ; Restore POSN going to
 	XCHG	AX,CX
-CHWRPX:	CLC	
-	JMP	SHORT CHWRPZ	; All done
+@SCNDRV@_CHWRPX:	CLC
+	JMP	@SCNDRV@_CHWRPZ  ; All done
 ;** *** *** *** END
 ;** *** *** END
 ;** *** CASE: EOL
-CHWREL:	CALL	MKRMNL		; Make room on next line(make it EOL term'd)
-	JB	CHWRP3		; If error, make room for char on this line
-	CALL	SCNRDX		; Reread terminator for this line
-	JMP	SHORT CHWRWP	; Wrap to next line
+@SCNDRV@_CHWREL:	CALL	@SCNDRV@_MKRMNL  ; Make room on next line(make it EOL term'd)
+	JB	@SCNDRV@_CHWRP3  ; If error, make room for char on this line
+	CALL	@SCNDRV@_SCNRDX  ; Reread terminator for this line
+	JMP	@SCNDRV@_CHWRWP  ; Wrap to next line
 ;** *** CASE: LF
-CHWRLF:	XCHG	AX,CX
-	CALL	WRAPLF		; First wrap LF to next line
-	MOV	AL,LOW OFFSET TRMNWP	; Set to temporary NULL_WRAP at last column
-	MOV	AH,BYTE PTR LINLEN
-	CALL	SCNWTT
+@SCNDRV@_CHWRLF:	XCHG	AX,CX
+	CALL	@SCNDRV@_WRAPLF  ; First wrap LF to next line
+	MOV	AL,((@TRMNWP) and 0FFh)  ; Set to temporary NULL_WRAP at last column
+	MOV	AH,byte [@LINLEN]
+	CALL	@SCNDRV@_SCNWTT
 	XCHG	AX,CX
-	JNB	CHWRWP		; Go do wrap for char
+	JNB	@SCNDRV@_CHWRWP  ; Go do wrap for char
 ;No room, abort
-CHWRP3:	MOV	AH,BYTE PTR LINLEN	; AH=POSN going to
-CHWRNO:	MOV	DH,AH
-	SUB	DH,AL		; DH=POSN-(char len)
-	STC			; Error return
+@SCNDRV@_CHWRP3:	MOV	AH,byte [@LINLEN]  ; AH=POSN going to
+@SCNDRV@_CHWRNO:	MOV	DH,AH
+	SUB	DH,AL  ; DH=POSN-(char len)
+	STC  ; Error return
 ;** *** END CASE TERMINATOR(CURRENT_LINE)
 
 ;** EXIT
-CHWRPZ:	PUSHF	
-	XCHG	AX,CX		; CH=POSN, AX=current terminators
+@SCNDRV@_CHWRPZ:	PUSHF
+	XCHG	AX,CX  ; CH=POSN, AX=current terminators
 	CMP	AH,CH
 	MOV	AH,CH
-	JA	CHWRP9		; BRIF Current terminator beyond posn for output
+	JA	@SCNDRV@_CHWRP9  ; BRIF Current terminator beyond posn for output
 	PUSH	AX
-	CALL	SCNRDT
+	CALL	@SCNRDT
 	POP	AX
-	CALL	SCNWTT		; Set current terminator to new max posn
-CHWRP9:	MOV	BYTE PTR CSRY,DL
-	CMP	DL,BYTE PTR LSTLIN
-	JNZ	CHWNTL		; BRIF not on last logical line
-	CMP	AH,BYTE PTR LSTCOL
-	JB	CHWNTL		; BRIF not new last position
-	MOV	BYTE PTR LSTCOL,AH	; Set new last posn
-CHWNTL:	CMP	DL,BYTE PTR FSTLIN
-	JNZ	CHWNTF		; BRIF not on first logical line
-	CMP	DH,BYTE PTR FSTCOL
-	JAE	CHWNTF		; BRIF not new first position
-	MOV	BYTE PTR FSTCOL,DH
-CHWNTF:	INC	AH
-	MOV	BYTE PTR CSRX,AH	; Set new posn(one past last posn printed at)
-	CMP	BYTE PTR LINLEN,AH
-	JAE	CHWNTG		; BRIF does not go beyond end of physical line
-	CALL	SCNRDT
-	JB	CHWNTG		; BRIF line does not continue
-	INC	BYTE PTR CSRY	;   Logical line continues, put cursor at
-	MOV	AH,BYTE PTR WDOLFT	;       start of next physical line
-	MOV	BYTE PTR CSRX,AH
-CHWNTG:	POPF	
+	CALL	@SCNDRV@_SCNWTT  ; Set current terminator to new max posn
+@SCNDRV@_CHWRP9:	MOV	byte [@CSRY],DL
+	CMP	DL,byte [@LSTLIN]
+	JNZ	@SCNDRV@_CHWNTL  ; BRIF not on last logical line
+	CMP	AH,byte [@LSTCOL]
+	JB	@SCNDRV@_CHWNTL  ; BRIF not new last position
+	MOV	byte [@LSTCOL],AH  ; Set new last posn
+@SCNDRV@_CHWNTL:	CMP	DL,byte [@FSTLIN]
+	JNZ	@SCNDRV@_CHWNTF  ; BRIF not on first logical line
+	CMP	DH,byte [@FSTCOL]
+	JAE	@SCNDRV@_CHWNTF  ; BRIF not new first position
+	MOV	byte [@FSTCOL],DH
+@SCNDRV@_CHWNTF:	INC	AH
+	MOV	byte [@CSRX],AH  ; Set new posn(one past last posn printed at)
+	CMP	byte [@LINLEN],AH
+	JAE	@SCNDRV@_CHWNTG  ; BRIF does not go beyond end of physical line
+	CALL	@SCNRDT
+	JB	@SCNDRV@_CHWNTG  ; BRIF line does not continue
+	INC	byte [@CSRY]  ;   Logical line continues, put cursor at
+	MOV	AH,byte [@WDOLFT]  ;       start of next physical line
+	MOV	byte [@CSRX],AH
+@SCNDRV@_CHWNTG:	POPF
 	POP	AX
-	RET	
+	RET
 ;Wrap linefeed on end of line to next line
-WRAPLF:	PUSH	WORD PTR TRMCUR
+@SCNDRV@_WRAPLF:	PUSH	word [@TRMCUR]
 	PUSH	CX
 	PUSH	DX
-	MOV	DH,BYTE PTR LINLEN
-	MOV	CH,LOW 1
-	CALL	MKRMCH		; Insert one space before LF
+	MOV	DH,byte [@LINLEN]
+	MOV	CH,((1) and 0FFh)
+	CALL	@SCNDRV@_MKRMCH  ; Insert one space before LF
 	POP	CX
 	MOV	CL,DL
 	POP	DX
 	XCHG	CX,DX
-	POP	WORD PTR TRMCUR
-	RET	
-	SUBTTL  LINE WRAP LOGIC - Open next line for wrap
-
-
+	POP	word [@TRMCUR]
+	RET
+; SUBTTL  LINE WRAP LOGIC - Open next line for wrap
 
 ;SUBROUTINE MKRMNL(line)        ; Make the next line a blank, empty line
 ;**                     on entry:   DL=current line number
 ;**                     on exit:    DL=current line number(may change from entry)
 ;**                                 if CF=1 no room available
 ;**
-MKRMNL:	PUSH	AX
+@SCNDRV@_MKRMNL:	PUSH	AX
 	PUSH	BX
 	PUSH	CX
 	PUSH	DX
-MKRMN0:	CALL	SCNRDT
-	JB	MKRMN5
-	CMP	DL,BYTE PTR WDOBOT
-	JZ	MKRMN6
-	JB	MKRMN4
-	MOV	DL,BYTE PTR WDOBOT
-	JMP	SHORT MKRMN0
-MKRMN4:	INC	DL
-	JMP	SHORT MKRMN0
+@SCNDRV@_MKRMN0:	CALL	@SCNRDT
+	JB	@SCNDRV@_MKRMN5
+	CMP	DL,byte [@WDOBOT]
+	JZ	@SCNDRV@_MKRMN6
+	JB	@SCNDRV@_MKRMN4
+	MOV	DL,byte [@WDOBOT]
+	JMP	@SCNDRV@_MKRMN0
+@SCNDRV@_MKRMN4:	INC	DL
+	JMP	@SCNDRV@_MKRMN0
 
 ;** IF CURRENT_PHYSICAL .LT. WINDOW_BOTTOM
-MKRMN5:	CMP	DL,BYTE PTR WDOBOT
-MKRMN6:	POP	DX
-	PUSH	DX		; Get back posn to scroll from
-	JZ	MKRMN7		; BRIF at bottom of window(scroll up)
-	CMC	
-	JB	MKRMNZ		; BRIF outside of window
-	CMP	DL,BYTE PTR WDOTOP
-	JB	MKRMNZ		; BRIF outside of window
-	TEST	BYTE PTR F_EDIT,LOW 377O
-	JZ	MKRMNZ		; BRIF not editing, no need to scroll
-	INC	DL		; Scroll down starting at next line
+@SCNDRV@_MKRMN5:	CMP	DL,byte [@WDOBOT]
+@SCNDRV@_MKRMN6:	POP	DX
+	PUSH	DX  ; Get back posn to scroll from
+	JZ	@SCNDRV@_MKRMN7  ; BRIF at bottom of window(scroll up)
+	CMC
+	JB	@SCNDRV@_MKRMNZ  ; BRIF outside of window
+	CMP	DL,byte [@WDOTOP]
+	JB	@SCNDRV@_MKRMNZ  ; BRIF outside of window
+	TEST	byte [@F_EDIT],((255) and 0FFh)
+	JZ	@SCNDRV@_MKRMNZ  ; BRIF not editing, no need to scroll
+	INC	DL  ; Scroll down starting at next line
 ;** *** SCROLL DOWN
-	CALL	SCRLD0		; Scroll down to end of window
-MKRMNY:	CLC			; Indicate successful
-MKRMNZ:	POP	DX		; Restore current line number
-	JMP	SHORT MKRMNX
+	CALL	@SCNDRV@_SCRLD0  ; Scroll down to end of window
+@SCNDRV@_MKRMNY:	CLC  ; Indicate successful
+@SCNDRV@_MKRMNZ:	POP	DX  ; Restore current line number
+	JMP	@SCNDRV@_MKRMNX
 ;** *** ELSE IF (FIRST_PHYSICAL(LOGICAL) .NE. WINDOW_TOP) OR NOT(INPUT_EDIT)
-MKRMN7:	TEST	BYTE PTR F_EDIT,LOW 377O
-	JZ	MKRMN9		; BRIF not input edit, always allow scroll
-MKRMN8:	CALL	CSRUP
-	JB	MKRMNZ		; BRIF logical line starts at top of window(abort)
+@SCNDRV@_MKRMN7:	TEST	byte [@F_EDIT],((255) and 0FFh)
+	JZ	@SCNDRV@_MKRMN9  ; BRIF not input edit, always allow scroll
+@SCNDRV@_MKRMN8:	CALL	@SCNDRV@_CSRUP
+	JB	@SCNDRV@_MKRMNZ  ; BRIF logical line starts at top of window(abort)
 	PUSH	AX
-	CALL	SCNRDT
+	CALL	@SCNRDT
 	POP	AX
-	JNB	MKRMN8		; BRIF previous physical part of this logical
+	JNB	@SCNDRV@_MKRMN8  ; BRIF previous physical part of this logical
 ;** *** SCROLL UP
-MKRMN9:	POP	DX
+@SCNDRV@_MKRMN9:	POP	DX
 	PUSH	DX
-	CMP	DL,BYTE PTR WDOBOT	; Full screen scroll?
-	JAE	MKRMNF		; BRIF scroll up entire screen
-	CALL	SCRLUD		; Scroll up from DL to WDOTOP
-	JMP	SHORT MKRMNU
-MKRMNF:	CALL	SCRLUP		; Scroll up entire window
-MKRMNU:	POP	DX
-	CALL	CSRUP		; Return line number of original line
-	CLC	
-MKRMNX:	POP	CX
+	CMP	DL,byte [@WDOBOT]  ; Full screen scroll?
+	JAE	@SCNDRV@_MKRMNF  ; BRIF scroll up entire screen
+	CALL	@SCNDRV@_SCRLUD  ; Scroll up from DL to WDOTOP
+	JMP	@SCNDRV@_MKRMNU
+@SCNDRV@_MKRMNF:	CALL	@SCNDRV@_SCRLUP  ; Scroll up entire window
+@SCNDRV@_MKRMNU:	POP	DX
+	CALL	@SCNDRV@_CSRUP  ; Return line number of original line
+	CLC
+@SCNDRV@_MKRMNX:	POP	CX
 	POP	BX
 	POP	AX
-	RET	
-	SUBTTL  SCROLL ROUTINES - Scroll up and down
-
+	RET
+; SUBTTL  SCROLL ROUTINES - Scroll up and down
 
 ;Scroll up from DL to WDOTOP
-SCRLUD:	PUSH	CX
+@SCNDRV@_SCRLUD:	PUSH	CX
 	MOV	CL,DL
-	MOV	DL,BYTE PTR WDOTOP
-	JMP	SHORT SCRLU1
+	MOV	DL,byte [@WDOTOP]
+	JMP	@SCNDRV@_SCRLU1
 ;SCROLL UP
-SCRLUP:	MOV	DL,BYTE PTR WDOTOP	; Top line number
+@SCNDRV@_SCRLUP:	MOV	DL,byte [@WDOTOP]  ; Top line number
 ;Scroll up from DL to bottom
-SCRLU0:	PUSH	CX
-	MOV	CL,BYTE PTR WDOBOT
-SCRLU1:	PUSH	AX
+@SCNDRV@_SCRLU0:	PUSH	CX
+	MOV	CL,byte [@WDOBOT]
+@SCNDRV@_SCRLU1:	PUSH	AX
 	PUSH	BX
 	PUSH	DX
 	MOV	AL,DL
-	MOV	BL,DL		; From = To = Top line number
-	INC	AL		; From = To + 1
-	MOV	BH,BYTE PTR WDOLFT
-	MOV	AH,BH		; From column = To column = left margin
-	SUB	CL,BL		; CL = line count
-	JA	SCRUL1		; BRIF two or more line scroll
-	JB	SCRUL4		; BRIF TOP > BOTTOM(should never happen)
+	MOV	BL,DL  ; From = To = Top line number
+	INC	AL  ; From = To + 1
+	MOV	BH,byte [@WDOLFT]
+	MOV	AH,BH  ; From column = To column = left margin
+	SUB	CL,BL  ; CL = line count
+	JA	@SCNDRV@_SCRUL1  ; BRIF two or more line scroll
+	JB	@SCNDRV@_SCRUL4  ; BRIF TOP > BOTTOM(should never happen)
 	PUSH	AX
 	MOV	DL,BL
-	JMP	SHORT SCRUL3	; TOP=BOTTOM, just init line
-SCRUL1:	PUSH	AX
-	MOV	CH,BYTE PTR CRTWID	; Scroll entire lines
-	CALL	SCROLL		; Scroll screen
+	JMP	@SCNDRV@_SCRUL3  ; TOP=BOTTOM, just init line
+@SCNDRV@_SCRUL1:	PUSH	AX
+	MOV	CH,byte [@CRTWID]  ; Scroll entire lines
+	CALL	@SCROLL  ; Scroll screen
 ;If CSRY, FSTLIN, LSTLIN are within scroll, decrement their values
-	ADD	AL,CL		; AL=Last line scrolled + 1
-	DEC	AL		; AL=Bottom line scrolled
-				; BL=Top line scrolled
-	MOV	AH,LOW 255D	; decrement line# variables in scroll window
-	CALL	TSTSCR
-	MOV	DL,AL		; DL=bottom line of scroll (initialize it)
+	ADD	AL,CL  ; AL=Last line scrolled + 1
+	DEC	AL  ; AL=Bottom line scrolled
+; BL=Top line scrolled
+	MOV	AH,((255) and 0FFh)  ; decrement line# variables in scroll window
+	CALL	@SCNDRV@_TSTSCR
+	MOV	DL,AL  ; DL=bottom line of scroll (initialize it)
 ;Clear the last line of the scroll
-SCRUL3:	MOV	DH,BYTE PTR WDOLFT
+@SCNDRV@_SCRUL3:	MOV	DH,byte [@WDOLFT]
 	POP	AX
 	OR	CL,CL
-	JE	SCRUL4		; No scroll(one line init)
-	CALL	SCRUTT		; Scroll up terminator table
-SCRUL4:	CALL	PLINIT		; Init physical line from (DL,DH) to (DL,WDORGT)
+	JE	@SCNDRV@_SCRUL4  ; No scroll(one line init)
+	CALL	@SCNDRV@_SCRUTT  ; Scroll up terminator table
+@SCNDRV@_SCRUL4:	CALL	@SCNDRV@_PLINIT  ; Init physical line from (DL,DH) to (DL,WDORGT)
 	POP	DX
 	POP	BX
 	POP	AX
 	POP	CX
-	RET	
+	RET
 
 ;TSTSCR is called after Scrolling Up or Down to update Line Number variables
 ; which may be in the scroll window
 ; Entry - BL=top line number of scroll window
 ;         AL=bottom line number of scroll window
 ;         AH=1 if line# variables are to be incremented, -1 if decremented
-;
-TSTSCR:	PUSH	SI
+
+@SCNDRV@_TSTSCR:	PUSH	SI
 	PUSH	AX
-	MOV	SI,OFFSET CSRY
-	CALL	TSTWDO		; Adjust CSRY if its within scroll window
-	MOV	AH,BYTE PTR WDOTOP
-	CMP	BYTE PTR 0[SI],AH
-	JB	TCSRY1		; BRIF CSRY above top of window
-	MOV	AH,BYTE PTR WDOBOT
-	CMP	BYTE PTR 0[SI],AH
-	JNA	CSRYOK		; BRIF CSRY didn't increment beyond bottom
-TCSRY1:	MOV	BYTE PTR 0[SI],AH	; Bring it back to within scroll window
-CSRYOK:	MOV	SI,OFFSET FSTLIN
+	MOV	SI,@CSRY
+	CALL	@SCNDRV@_TSTWDO  ; Adjust CSRY if its within scroll window
+	MOV	AH,byte [@WDOTOP]
+	CMP	byte [SI+0],AH
+	JB	@SCNDRV@_TCSRY1  ; BRIF CSRY above top of window
+	MOV	AH,byte [@WDOBOT]
+	CMP	byte [SI+0],AH
+	JNA	@SCNDRV@_CSRYOK  ; BRIF CSRY didn't increment beyond bottom
+@SCNDRV@_TCSRY1:	MOV	byte [SI+0],AH  ; Bring it back to within scroll window
+@SCNDRV@_CSRYOK:	MOV	SI,@FSTLIN
 	POP	AX
-	CALL	TSTWDO		; Adjust FSTLIN if its within scroll window
-	MOV	SI,OFFSET LSTLIN
-	CALL	TSTWDO		; Adjust LSTLIN if its within scroll window
+	CALL	@SCNDRV@_TSTWDO  ; Adjust FSTLIN if its within scroll window
+	MOV	SI,@LSTLIN
+	CALL	@SCNDRV@_TSTWDO  ; Adjust LSTLIN if its within scroll window
 	POP	SI
-	RET	
+	RET
 
 ; If BL .LEQ. [SI] .LEQ. AL then [SI]=[SI]+AH
-;
-TSTWDO:
-	CMP	AL,BYTE PTR 0[SI]
-	JB	NINWDO		; BRIF [SI] not within scroll
-	CMP	BL,BYTE PTR 0[SI]
-	JA	NINWDO		; BRIF [SI] not within scroll
-	ADD	BYTE PTR 0[SI],AH	; Adjust [SI] for scroll
-NINWDO:	RET	
 
-
+@SCNDRV@_TSTWDO:
+	CMP	AL,byte [SI+0]
+	JB	@SCNDRV@_NINWDO  ; BRIF [SI] not within scroll
+	CMP	BL,byte [SI+0]
+	JA	@SCNDRV@_NINWDO  ; BRIF [SI] not within scroll
+	ADD	byte [SI+0],AH  ; Adjust [SI] for scroll
+@SCNDRV@_NINWDO:	RET
 
 ;SCROLL DOWN
-SCRLDN:	MOV	DL,BYTE PTR WDOTOP
+@SCNDRV@_SCRLDN:	MOV	DL,byte [@WDOTOP]
 ;Scroll down from DL to WDOBOT
-SCRLD0:	PUSH	AX
+@SCNDRV@_SCRLD0:	PUSH	AX
 	PUSH	BX
 	PUSH	CX
 	MOV	AL,DL
-	MOV	BL,DL		; From = To = top of scroll
-	INC	BL		; To = From + 1
-	MOV	BH,BYTE PTR WDOLFT	; Column = left margin
+	MOV	BL,DL  ; From = To = top of scroll
+	INC	BL  ; To = From + 1
+	MOV	BH,byte [@WDOLFT]  ; Column = left margin
 	MOV	AH,BH
-	MOV	CL,BYTE PTR WDOBOT
-	SUB	CL,AL		; Count of lines =(window bottom)-top of scroll
+	MOV	CL,byte [@WDOBOT]
+	SUB	CL,AL  ; Count of lines =(window bottom)-top of scroll
 	PUSH	AX
-	JBE	SCRDL3		; BRIF null scroll, just clear line
-	MOV	CH,BYTE PTR WDORGT	; Scroll lines, not columns
-SCRLD1:	CALL	SCROLL		; Scroll screen
+	JBE	@SCNDRV@_SCRDL3  ; BRIF null scroll, just clear line
+	MOV	CH,byte [@WDORGT]  ; Scroll lines, not columns
+@SCNDRV@_SCRLD1:	CALL	@SCROLL  ; Scroll screen
 ;If CSRY, FSTLIN, LSTLIN are within scroll, increment their values
-	ADD	AL,CL		; AL=Last line scrolled
+	ADD	AL,CL  ; AL=Last line scrolled
 	DEC	AL
-	MOV	AH,LOW 1	; increment line# variables in scroll window
-	CALL	TSTSCR
+	MOV	AH,((1) and 0FFh)  ; increment line# variables in scroll window
+	CALL	@SCNDRV@_TSTSCR
 ;Clear the last line of the scroll(in DL)
-SCRDL3:	MOV	DH,BYTE PTR WDOLFT
+@SCNDRV@_SCRDL3:	MOV	DH,byte [@WDOLFT]
 	POP	AX
 	OR	CL,CL
-	JS	SCRDL4		; No scroll(out of window)
-	JE	SCRDL4		; No scroll(one line init)
-	CALL	SCRDTT		; Scroll down term table(mark last line init'd)
-SCRDL4:	CALL	PLINIT		; Init physical line from (DL,DH) to (DL,WDORGT)
+	JS	@SCNDRV@_SCRDL4  ; No scroll(out of window)
+	JE	@SCNDRV@_SCRDL4  ; No scroll(one line init)
+	CALL	@SCNDRV@_SCRDTT  ; Scroll down term table(mark last line init'd)
+@SCNDRV@_SCRDL4:	CALL	@SCNDRV@_PLINIT  ; Init physical line from (DL,DH) to (DL,WDORGT)
 	POP	CX
 	POP	BX
 	POP	AX
-	RET	
+	RET
 
 ;SCROLL DOWN current line to next line
-SCRDLN:	PUSH	AX
+@SCNDRV@_SCRDLN:	PUSH	AX
 	PUSH	BX
 	PUSH	CX
-	MOV	AX,DX		; Start of scroll is current line
-	MOV	AH,BYTE PTR WDOLFT
+	MOV	AX,DX  ; Start of scroll is current line
+	MOV	AH,byte [@WDOLFT]
 	MOV	BX,AX
-	INC	BL		; TO start is next line
-	MOV	CH,BYTE PTR WDORGT
-	MOV	CL,LOW 1	; Scroll one entir line
+	INC	BL  ; TO start is next line
+	MOV	CH,byte [@WDORGT]
+	MOV	CL,((1) and 0FFh)  ; Scroll one entir line
 	PUSH	AX
-	JMP	SHORT SCRLD1	; Do scroll and update LSTPOS, FSTPOS, CSRY
-	SUBTTL  SCROLL ROUTINES - Support routines: scroll terminator table, line init
-
-
+	JMP	@SCNDRV@_SCRLD1  ; Do scroll and update LSTPOS, FSTPOS, CSRY
+; SUBTTL  SCROLL ROUTINES - Support routines: scroll terminator table, line init
 
 ;Scroll up terminator table(same parameters as SCROLL)
 ;                   on entry:   (see SCROLL)
 ;                   on exit:    modifies AX, BX, CX
-;
-SCRUTT:	PUSH	DX
+
+@SCNDRV@_SCRUTT:	PUSH	DX
 	MOV	DL,BL
-	CALL	SCNRDT		; TRMCUR=address of top of scroll
-	MOV	BX,WORD PTR TRMCUR
-	MOV	CH,LOW 0
-SCRUTL:	MOV	AX,WORD PTR LINTTB[BX]	; Get a terminator
-	MOV	WORD PTR LINTTB-2[BX],AX	; Save a terminator
+	CALL	@SCNRDT  ; TRMCUR=address of top of scroll
+	MOV	BX,word [@TRMCUR]
+	MOV	CH,((0) and 0FFh)
+@SCNDRV@_SCRUTL:	MOV	AX,word [@LINTTB+BX]  ; Get a terminator
+	MOV	word [@LINTTB-2+BX],AX  ; Save a terminator
 	INC	BX
 	INC	BX
-	LOOP	SCRUTL		; Continue till done
-	MOV	BYTE PTR LINTTB-2[BX],LOW 0	; Terminate end line of scroll
-	MOV	BYTE PTR LINTTB-1[BX],LOW OFFSET TRMEOL
+	LOOP	@SCNDRV@_SCRUTL  ; Continue till done
+	MOV	byte [@LINTTB-2+BX],((0) and 0FFh)  ; Terminate end line of scroll
+	MOV	byte [@LINTTB-1+BX],((@TRMEOL) and 0FFh)
 	POP	DX
-	RET	
+	RET
 
 ;Scroll down terminator table(same parameters as SCROLL)
 ;                   on entry:   (see SCROLL)
 ;                   on exit:    modifies AX, BX, CX
-;
-SCRDTT:
+
+@SCNDRV@_SCRDTT:
 	PUSH	DX
 	MOV	DL,AL
 	ADD	DL,CL
-	CALL	SCNRDT		; TRMCUR=displacement of bottom of scroll + 2
-	MOV	BX,WORD PTR TRMCUR
-	MOV	CH,LOW 0
-SCRDTL:	SUB	BX,2		; Next posn
-	MOV	AX,WORD PTR LINTTB-2[BX]	; Get a terminator
-	MOV	WORD PTR LINTTB[BX],AX	; Save a terminator
-	LOOP	SCRDTL		; Continue till done
-	MOV	BYTE PTR LINTTB-2[BX],LOW 0	; Terminate end line of scroll
-	MOV	BYTE PTR LINTTB-1[BX],LOW OFFSET TRMEOL
-	MOV	DL,BYTE PTR WDOBOT
-	CALL	SCNRTL
-	JB	SCRDT1		; EOL term'd, all done
-	JNZ	SCRDT1
+	CALL	@SCNRDT  ; TRMCUR=displacement of bottom of scroll + 2
+	MOV	BX,word [@TRMCUR]
+	MOV	CH,((0) and 0FFh)
+@SCNDRV@_SCRDTL:	SUB	BX,2  ; Next posn
+	MOV	AX,word [@LINTTB-2+BX]  ; Get a terminator
+	MOV	word [@LINTTB+BX],AX  ; Save a terminator
+	LOOP	@SCNDRV@_SCRDTL  ; Continue till done
+	MOV	byte [@LINTTB-2+BX],((0) and 0FFh)  ; Terminate end line of scroll
+	MOV	byte [@LINTTB-1+BX],((@TRMEOL) and 0FFh)
+	MOV	DL,byte [@WDOBOT]
+	CALL	@SCNDRV@_SCNRTL
+	JB	@SCNDRV@_SCRDT1  ; EOL term'd, all done
+	JNZ	@SCNDRV@_SCRDT1
 	DEC	AH
-SCRDT1:	MOV	AL,LOW OFFSET TRMEOL
-	CALL	SCNWTT		; Make sure last line in window is EOL term'd
+@SCNDRV@_SCRDT1:	MOV	AL,((@TRMEOL) and 0FFh)
+	CALL	@SCNDRV@_SCNWTT  ; Make sure last line in window is EOL term'd
 	POP	DX
-	RET	
+	RET
 
 ;Physical line initialization
 ;               on entry:   (DH,DL) = start of initialization
-;
-PLINIT:	PUSH	CX
+
+@SCNDRV@_PLINIT:	PUSH	CX
 	PUSH	AX
-	CALL	SCNRDT
+	CALL	@SCNRDT
 	MOV	AH,DH
 	DEC	AH
 	PUSH	BX
-	MOV	BX,WORD PTR TRMCUR	; Terminate line to left of DH
-	MOV	BYTE PTR LINTTB-1[BX],LOW OFFSET TRMEOL
-	MOV	BYTE PTR LINTTB-2[BX],AH
+	MOV	BX,word [@TRMCUR]  ; Terminate line to left of DH
+	MOV	byte [@LINTTB-1+BX],((@TRMEOL) and 0FFh)
+	MOV	byte [@LINTTB-2+BX],AH
 	POP	BX
 	POP	AX
-PLINI2:	CALL	CLREOL		; Clear to end of line from (DH,DL)
+@SCNDRV@_PLINI2:	CALL	@CLREOL  ; Clear to end of line from (DH,DL)
 	POP	CX
-	RET	
-	SUBTTL  LABEL Key Processing
-
+	RET
+; SUBTTL  LABEL Key Processing
 
 ;LABELK - If function key display is off then turn on and exit.
 ;         If function key display is on then advance display line and
@@ -808,105 +776,101 @@ PLINI2:	CALL	CLREOL		; Clear to end of line from (DH,DL)
 ;ENTRY  - DX = cursor position
 ;EXIT   - DX unmodified
 ;USES   - AX,BX,CX
-;
-	EXTRN	FKYADV:NEAR,KEYDSP:NEAR,FKYFMT:NEAR
-DSEG	SEGMENT PUBLIC 'DATASG'
-	EXTRN	KEYSW:WORD
-DSEG	ENDS
-LABELK:	PUSH	AX
+
+; EXTRN	FKYADV:NEAR,KEYDSP:NEAR,FKYFMT:NEAR
+end if
+; EXTRN	KEYSW:WORD
+if @GW_PASS = 1
+@SCNDRV@_LABELK:	PUSH	AX
 	PUSH	BX
 	PUSH	CX
 	PUSH	DX
 	PUSH	SI
 	PUSH	DI
-	CMP	BYTE PTR KEYSW,LOW 0D	;Test for key on
-	CALL	FKYADV		;If KEYSW was 0(ZF=0) then init PF start key,
-				;   else advance to next set of PF keys
-				;   return ZF=1 if advance beyond last of PF keys
-	JZ	LABOFF		;Process key off request
-	MOV	BYTE PTR KEYSW,LOW 255D	;Turn on key display flag
-LABDSP:	CALL	KEYDSP		;Display function keys
+	CMP	byte [@KEYSW],((0) and 0FFh)  ;Test for key on
+	CALL	@FKYADV  ;If KEYSW was 0(ZF=0) then init PF start key,
+;   else advance to next set of PF keys
+;   return ZF=1 if advance beyond last of PF keys
+	JZ	@SCNDRV@_LABOFF  ;Process key off request
+	MOV	byte [@KEYSW],((255) and 0FFh)  ;Turn on key display flag
+@SCNDRV@_LABDSP:	CALL	@KEYDSP  ;Display function keys
 	POP	DI
 	POP	SI
 	POP	DX
 	POP	CX
 	POP	BX
 	POP	AX
-	RET	
+	RET
 
-LABOFF:
-	MOV	BYTE PTR KEYSW,LOW 0D	;Turn the key flag off
-	JMP	SHORT LABDSP	;Go clear the function key display line
-	SUBTTL  Miscellaneous editor interface routines
-
-
+@SCNDRV@_LABOFF:
+	MOV	byte [@KEYSW],((0) and 0FFh)  ;Turn the key flag off
+	JMP	@SCNDRV@_LABDSP  ;Go clear the function key display line
+; SUBTTL  Miscellaneous editor interface routines
 
 ;SUBROUTINE SCNMRK              ; Mark current position as first posn of logical
 ;**                 on entry:   ZF=1 indicates INPUT statement, AL=1 indicates
 ;**                                 EDIT statement.
 ;**                 on exit:    -
 ;**
-SCNMRK:	PUSHF	
-	MOV	DL,BYTE PTR CSRY
-	MOV	DH,BYTE PTR CSRX
+@SCNMRK:	PUSHF
+	MOV	DL,byte [@CSRY]
+	MOV	DH,byte [@CSRX]
 	DEC	AL
-	JNZ	SCNMK0		; Not begin of EDIT statement
-	CALL	LSTART		; Set (DH,DL)=start of current line
+	JNZ	@SCNDRV@_SCNMK0  ; Not begin of EDIT statement
+	CALL	@SCNDRV@_LSTART  ; Set (DH,DL)=start of current line
 	PUSH	BX
-	JMP	SHORT SCNMK2
+	JMP	@SCNDRV@_SCNMK2
 ;** IF NOT TOP OF WINDOW
-SCNMK0:	CALL	CSRUP		; Move to previous line
-	JB	SCNMK1		; BRIF at top of window
+@SCNDRV@_SCNMK0:	CALL	@SCNDRV@_CSRUP  ; Move to previous line
+	JB	@SCNDRV@_SCNMK1  ; BRIF at top of window
 ;** *** TERMINATE PREVIOUS PHYSICAL LINE
-	CALL	SCNRTL
-	MOV	AL,LOW OFFSET TRMEOL	; Make sure current line is start of logical line
-	CALL	SCNWTT
-	INC	DL		; Restore current line number
+	CALL	@SCNDRV@_SCNRTL
+	MOV	AL,((@TRMEOL) and 0FFh)  ; Make sure current line is start of logical line
+	CALL	@SCNDRV@_SCNWTT
+	INC	DL  ; Restore current line number
 ;** IF LINE IS MARKED WITH NULL
-SCNMK1:	CALL	SCNRDT
+@SCNDRV@_SCNMK1:	CALL	@SCNRDT
 	PUSH	BX
-	MOV	BX,WORD PTR TRMCUR
-	TEST	BYTE PTR LINTTB-1[BX],LOW OFFSET TRMNUL
-	JZ	SCNMK2		; BRIF not specially marked line
+	MOV	BX,word [@TRMCUR]
+	TEST	byte [@LINTTB-1+BX],((@TRMNUL) and 0FFh)
+	JZ	@SCNDRV@_SCNMK2  ; BRIF not specially marked line
 	PUSH	DX
 	PUSH	CX
 ;** SCAN LINE FOR NULL CHAR(255 DECIMAL)
-	MOV	DH,BYTE PTR WDOLFT
-	MOV	CL,BYTE PTR LINLEN
-SCNMKL:	CALL	SCRINP
-	CMP	AL,LOW 255D
-	JZ	SCNML3		; BRIF is specially marked line
-SCNML2:	INC	DH
-	SUB	CL,LOW 1
-	JA	SCNMKL		; BRIF more chars to check
+	MOV	DH,byte [@WDOLFT]
+	MOV	CL,byte [@LINLEN]
+@SCNDRV@_SCNMKL:	CALL	@SCRINP
+	CMP	AL,((255) and 0FFh)
+	JZ	@SCNDRV@_SCNML3  ; BRIF is specially marked line
+@SCNDRV@_SCNML2:	INC	DH
+	SUB	CL,((1) and 0FFh)
+	JA	@SCNDRV@_SCNMKL  ; BRIF more chars to check
 	OR	SP,SP
-SCNML3:
+@SCNDRV@_SCNML3:
 	POP	CX
 	POP	DX
-	JNZ	SCNMK2		; BRIF char was not on line, don't clear line
+	JNZ	@SCNDRV@_SCNMK2  ; BRIF char was not on line, don't clear line
 ;** *** DELETE IT
-	CALL	LDELET		; Delete this line
+	CALL	@SCNDRV@_LDELET  ; Delete this line
 ;** IF NOT DIRECT, SET LSTPOS, FSTPOS = CURRENT_POSN
-SCNMK2:
-	MOV	BYTE PTR CSRY,DL
-	MOV	BYTE PTR CSRX,DH	; Update CURS_POSN in case of change
+@SCNDRV@_SCNMK2:
+	MOV	byte [@CSRY],DL
+	MOV	byte [@CSRX],DH  ; Update CURS_POSN in case of change
 	POP	BX
-	POPF	
-	JZ	SCNMK3		; INPUT statement, use current posn
-	MOV	BYTE PTR LSTLIN,LOW 377O	; Direct, set FSTPOS, LSTPOS to min and max
-	MOV	BYTE PTR FSTLIN,LOW 0
-	JMP	SHORT SCNMKX
-SCNMK3:	MOV	BYTE PTR LSTLIN,DL
-	MOV	BYTE PTR FSTLIN,DL
+	POPF
+	JZ	@SCNDRV@_SCNMK3  ; INPUT statement, use current posn
+	MOV	byte [@LSTLIN],((255) and 0FFh)  ; Direct, set FSTPOS, LSTPOS to min and max
+	MOV	byte [@FSTLIN],((0) and 0FFh)
+	JMP	@SCNDRV@_SCNMKX
+@SCNDRV@_SCNMK3:	MOV	byte [@LSTLIN],DL
+	MOV	byte [@FSTLIN],DL
 	DEC	DH
-	MOV	BYTE PTR LSTCOL,DH	; Mark LSTCOL one to left of current posn
+	MOV	byte [@LSTCOL],DH  ; Mark LSTCOL one to left of current posn
 	INC	DH
-	MOV	BYTE PTR FSTCOL,DH
-SCNMKX:	RET	
+	MOV	byte [@FSTCOL],DH
+@SCNDRV@_SCNMKX:	RET
 ;** END SUBROUTINE SCNMRK
-	SUBTTL  Read logical line
-
-
+; SUBTTL  Read logical line
 
 ;SUBROUTINE SCNRDL              ; Read a logical line
 ;**                     on entry:   ZF=1 indicates ignore FSTPOS, LSTPOS(statement
@@ -918,255 +882,251 @@ SCNMKX:	RET
 ;**                                 CX=CX - (count of chars moved)
 ;**                                 DX=destroyed
 ;**
-SCNRDL:	PUSHF			; Save statement input flag
+@SCNRDL:	PUSHF  ; Save statement input flag
 ;** Set DX=start of move
 ;** WHILE ((DL .NE FSTLIN) AND DL IN_SAME_LOGICAL_LINE)
-SCRD00:	CMP	DL,BYTE PTR FSTLIN
-	JZ	SCRD01		; Found first line of logical
+@SCNDRV@_SCRD00:	CMP	DL,byte [@FSTLIN]
+	JZ	@SCNDRV@_SCRD01  ; Found first line of logical
 ;** *** DL = PREVIOUS LINE
-	CALL	CSRUP
-	JB	SCRD01		; At top of window, stop here
-	CALL	SCNRDT
-	JNB	SCRD00		; Still same logical, continue
-	INC	DL		; Set DL = first physical of logical
+	CALL	@SCNDRV@_CSRUP
+	JB	@SCNDRV@_SCRD01  ; At top of window, stop here
+	CALL	@SCNRDT
+	JNB	@SCNDRV@_SCRD00  ; Still same logical, continue
+	INC	DL  ; Set DL = first physical of logical
 ;** IF (STATEMENT_INPUT OR (NOT ON FIRST_LINE))
-SCRD01:	POPF			; We have start line, now get start column
-	PUSHF	
+@SCNDRV@_SCRD01:	POPF  ; We have start line, now get start column
+	PUSHF
 ;** *** START_COLUMN=LEFT_MARGIN
-	MOV	DH,BYTE PTR WDOLFT	; Assume start at left margin
-	JNZ	SCRD02		; BRIF statement input
-	CMP	DL,BYTE PTR FSTLIN
-	JNZ	SCRD02		; BRIF not on FIRST_LINE
+	MOV	DH,byte [@WDOLFT]  ; Assume start at left margin
+	JNZ	@SCNDRV@_SCRD02  ; BRIF statement input
+	CMP	DL,byte [@FSTLIN]
+	JNZ	@SCNDRV@_SCRD02  ; BRIF not on FIRST_LINE
 ;** *** ELSE START_COLUMN=FIRST_COLUMN
-	MOV	DH,BYTE PTR FSTCOL
+	MOV	DH,byte [@FSTCOL]
 
 ;** WHILE (POSN IS ON SAME LOGICAL) AND ((POSN .LTE. LSTPOS) OR STATEMENT_INPUT) BEGIN
-SCRD02:	POPF	
-	PUSHF	
-	JNZ	SCRD03		; BRIF statement input, ignore LSTPOS
-	CMP	DL,BYTE PTR LSTLIN
-	JA	SCRDXZ		; **BRIF passed LSTPOS(was at prev. line term'r)
-	JNZ	SCRD03		; BRIF not at LSTPOS
-	CMP	DH,BYTE PTR LSTCOL
-	JA	SCRDXZ		; BRIF beyond LSTPOS, all done
+@SCNDRV@_SCRD02:	POPF
+	PUSHF
+	JNZ	@SCNDRV@_SCRD03  ; BRIF statement input, ignore LSTPOS
+	CMP	DL,byte [@LSTLIN]
+	JA	@SCNDRV@_SCRDXZ  ; **BRIF passed LSTPOS(was at prev. line term'r)
+	JNZ	@SCNDRV@_SCRD03  ; BRIF not at LSTPOS
+	CMP	DH,byte [@LSTCOL]
+	JA	@SCNDRV@_SCRDXZ  ; BRIF beyond LSTPOS, all done
 ;** *** READ A CHARACTER INTO THE BUFFER
 ;** *** DO CASE TERMINATOR OF LINEFEED, NULL_WRAP, WRAP, BEFORE EOL, AT EOL
-SCRD03:	CALL	SCNRDT
+@SCNDRV@_SCRD03:	CALL	@SCNRDT
 	PUSH	AX
-	JB	SCRD04		; BRIF not reading a linefeed
-	JNZ	SCRD04		; BRIF not reading a linefeed
+	JB	@SCNDRV@_SCRD04  ; BRIF not reading a linefeed
+	JNZ	@SCNDRV@_SCRD04  ; BRIF not reading a linefeed
 	CMP	AH,DH
-	JNZ	SCRD04		; BRIF not reading a linefeed
+	JNZ	@SCNDRV@_SCRD04  ; BRIF not reading a linefeed
 ;** *** *** CASE: LINEFEED
-SCRDLF:	MOV	AX,OFFSET CHRLNF+0
-	JMP	SHORT SCRD08	; At linefeed terminator, pass linefeed
-SCRD04:	CMP	AH,DH
-	JA	SCRD07		; BRIF within data on screen
-	JB	SCRD06		; BRIF beyond terminator
+@SCNDRV@_SCRDLF:	MOV	AX,@SCNDRV@_CHRLNF+0
+	JMP	@SCNDRV@_SCRD08  ; At linefeed terminator, pass linefeed
+@SCNDRV@_SCRD04:	CMP	AH,DH
+	JA	@SCNDRV@_SCRD07  ; BRIF within data on screen
+	JB	@SCNDRV@_SCRD06  ; BRIF beyond terminator
 ;** *** *** CASE: NULL_WRAP
-	CMP	AL,LOW OFFSET TRMNWP
-	JNZ	SCRD07		; BRIF not at NULL_WRAP terminator
-SCRD06:	CMP	AL,LOW OFFSET TRMEOL
+	CMP	AL,((@TRMNWP) and 0FFh)
+	JNZ	@SCNDRV@_SCRD07  ; BRIF not at NULL_WRAP terminator
+@SCNDRV@_SCRD06:	CMP	AL,((@TRMEOL) and 0FFh)
 	POP	AX
-	JZ	SCRDXZ		; BRIF beyond EOL
+	JZ	@SCNDRV@_SCRDXZ  ; BRIF beyond EOL
 ;** *** *** CASE: WRAP
-	INC	DL		; Wrap to next line
-	MOV	DH,BYTE PTR WDOLFT
-	JMP	SHORT SCRD02
+	INC	DL  ; Wrap to next line
+	MOV	DH,byte [@WDOLFT]
+	JMP	@SCNDRV@_SCRD02
 ;** *** *** CASE: BEFORE EOL
-SCRD07:
-	CLC			; Indicate call is from Screen Editor
-	CALL	SCRINP		; AX=Character at (DH,DL)
-SCRD08:	MOV	BYTE PTR 0[BX],AL
+@SCNDRV@_SCRD07:
+	CLC  ; Indicate call is from Screen Editor
+	CALL	@SCRINP  ; AX=Character at (DH,DL)
+@SCNDRV@_SCRD08:	MOV	byte [BX+0],AL
 	DEC	CX
 	POP	AX
-	JZ	SCRDEX
-	CMP	AL,LOW OFFSET TRMEOL
-	JNZ	SCRD09		; BRIF not at EOL
+	JZ	@SCNDRV@_SCRDEX
+	CMP	AL,((@TRMEOL) and 0FFh)
+	JNZ	@SCNDRV@_SCRD09  ; BRIF not at EOL
 	CMP	AH,DH
-	JBE	SCRDEX		; BRIF at EOL(or beyond), all done
-SCRD09:	INC	BX
-	CALL	CSRADV
-	JB	SCRDXZ		; If end of window, all done
-	JMP	SHORT SCRD02	; Pass next character
+	JBE	@SCNDRV@_SCRDEX  ; BRIF at EOL(or beyond), all done
+@SCNDRV@_SCRD09:	INC	BX
+	CALL	@SCNDRV@_CSRADV
+	JB	@SCNDRV@_SCRDXZ  ; If end of window, all done
+	JMP	@SCNDRV@_SCRD02  ; Pass next character
 ;** *** *** CASE: AT(OR BEYOND) EOL
-SCRDEX:	INC	BX		; Set BX= last posn written plus one
-SCRDXZ:	POPF	
-	CALL	SCNBRK		; Clear any flags associated with INPUT
-	RET	
+@SCNDRV@_SCRDEX:	INC	BX  ; Set BX= last posn written plus one
+@SCNDRV@_SCRDXZ:	POPF
+	CALL	@SCNBRK  ; Clear any flags associated with INPUT
+	RET
 ;** *** *** END
 ;** *** END
 ;** END SUBROUTINE SCNRDL
-	SUBTTL  CONTROL CHARACTER ROUTINES
-
+; SUBTTL  CONTROL CHARACTER ROUTINES
 
 ;CONTROL CHARACTER DISPATCH TABLE
 ;**
-FUNTAB:	DW	OFFSET CTLIGN	; ^@  -  Ignore
-	DW	OFFSET CTLIGN	; ^A  -  Ignore
-	DW	OFFSET BCKWRD	; ^B  -  Back one word
-	DW	OFFSET CTLIGN	; ^C  -  Ignore
-	DW	OFFSET CTLIGN	; ^D  -  Ignore
-	DW	OFFSET LTRUNC	; ^E  -  Truncate logical line
-	DW	OFFSET FWDWRD	; ^F  -  Forward one word
-	DW	OFFSET CBEEP	; ^G  -  Beep
-	DW	OFFSET BAKSPC	; ^H  -  Destructive backspace
-	DW	OFFSET LTAB	; ^I  -  Destructive tab
-	DW	OFFSET LFEED	; ^J  -  Linefeed
-	DW	OFFSET WHOME	; ^K  -  Home within window
-	DW	OFFSET CCLRSN	; ^L  -  Clear window, home cursor
-	DW	OFFSET LCARET	; ^M  -  Carriage return
-	DW	OFFSET LAPPND	; ^N  -  Append to end of line
-	DW	OFFSET CTLIGN	; ^O  -  Ignore
-	DW	OFFSET CTLIGN	; ^P  -  Ignore
-	DW	OFFSET CTLIGN	; ^Q  -  Ignore
-	DW	OFFSET LINSRT	; ^R  -  Insert a blank
-	DW	OFFSET CTLIGN	; ^S  -  Ignore
-	DW	OFFSET LABELK	; ^T  -  LABEL Key
-	DW	OFFSET LDELET	; ^U  -  Delete a line
-	DW	OFFSET CTLIGN	; ^V  -  Ignore
-	DW	OFFSET WDELET	; ^W  -  Delete a word
-	DW	OFFSET CTLIGN	; ^X  -  Ignore
-	DW	OFFSET CTLIGN	; ^Y  -  Ignore
-	DW	OFFSET WERASE	; ^Z  -  Erase to end of window
-	DW	OFFSET CTLIGN	; ^[ or ESC - Ignore
-	DW	OFFSET WCSADV	; ^\  -  Cursor advance within window
-	DW	OFFSET WCSREG	; ^]  -  Cursor regress within window
-	DW	OFFSET WCSUP	; ^^  -  Cursor up within window
-	DW	OFFSET WCSDWN	; ^_  -  Cursor down within window
-	DW	OFFSET CDELET	; DEL -  Delete a character
-
+@SCNDRV@_FUNTAB:	DW	@SCNDRV@_CTLIGN  ; ^@  -  Ignore
+	DW	@SCNDRV@_CTLIGN  ; ^A  -  Ignore
+	DW	@SCNDRV@_BCKWRD  ; ^B  -  Back one word
+	DW	@SCNDRV@_CTLIGN  ; ^C  -  Ignore
+	DW	@SCNDRV@_CTLIGN  ; ^D  -  Ignore
+	DW	@SCNDRV@_LTRUNC  ; ^E  -  Truncate logical line
+	DW	@SCNDRV@_FWDWRD  ; ^F  -  Forward one word
+	DW	@SCNDRV@_CBEEP  ; ^G  -  Beep
+	DW	@SCNDRV@_BAKSPC  ; ^H  -  Destructive backspace
+	DW	@SCNDRV@_LTAB  ; ^I  -  Destructive tab
+	DW	@SCNDRV@_LFEED  ; ^J  -  Linefeed
+	DW	@SCNDRV@_WHOME  ; ^K  -  Home within window
+	DW	@SCNDRV@_CCLRSN  ; ^L  -  Clear window, home cursor
+	DW	@SCNDRV@_LCARET  ; ^M  -  Carriage return
+	DW	@SCNDRV@_LAPPND  ; ^N  -  Append to end of line
+	DW	@SCNDRV@_CTLIGN  ; ^O  -  Ignore
+	DW	@SCNDRV@_CTLIGN  ; ^P  -  Ignore
+	DW	@SCNDRV@_CTLIGN  ; ^Q  -  Ignore
+	DW	@SCNDRV@_LINSRT  ; ^R  -  Insert a blank
+	DW	@SCNDRV@_CTLIGN  ; ^S  -  Ignore
+	DW	@SCNDRV@_LABELK  ; ^T  -  LABEL Key
+	DW	@SCNDRV@_LDELET  ; ^U  -  Delete a line
+	DW	@SCNDRV@_CTLIGN  ; ^V  -  Ignore
+	DW	@SCNDRV@_WDELET  ; ^W  -  Delete a word
+	DW	@SCNDRV@_CTLIGN  ; ^X  -  Ignore
+	DW	@SCNDRV@_CTLIGN  ; ^Y  -  Ignore
+	DW	@SCNDRV@_WERASE  ; ^Z  -  Erase to end of window
+	DW	@SCNDRV@_CTLIGN  ; ^[ or ESC - Ignore
+	DW	@SCNDRV@_WCSADV  ; ^\  -  Cursor advance within window
+	DW	@SCNDRV@_WCSREG  ; ^]  -  Cursor regress within window
+	DW	@SCNDRV@_WCSUP  ; ^^  -  Cursor up within window
+	DW	@SCNDRV@_WCSDWN  ; ^_  -  Cursor down within window
+	DW	@SCNDRV@_CDELET  ; DEL -  Delete a character
 
 ;SUBROUTINE CTLDSP(CONTROL_CHAR); Do control char logic
 ;**                         on entry:   AX=control character
 ;**                         on exit:    if CF=0 then AX=character to output
 ;**                                     if CF=1 then AX is undefined
-CTLDSP:
-	CALL	SCNPOS		; DH=column, DL=row
-DSEG	SEGMENT PUBLIC 'DATASG'
-	EXTRN	CSRTYP:WORD
-DSEG	ENDS
-	EXTRN	SETCSR:NEAR
-	MOV	BYTE PTR CSRTYP,LOW 0D	; Set for off cursor
-	CALL	SETCSR		; Ensure that the cursor is off
-	MOV	DH,BYTE PTR CSRX	; Set DH=true posn(not width truncated)
-	TEST	BYTE PTR ESCFLG,LOW 377O
-	JNZ	DOESC		; BRIF in middle of escape sequence
-	CMP	AL,LOW 33O
-	JZ	DOESC
-CTLDS0:
+@SCNDRV@_CTLDSP:
+	CALL	@SCNPOS  ; DH=column, DL=row
+end if
+; EXTRN	CSRTYP:WORD
+if @GW_PASS = 1
+; EXTRN	SETCSR:NEAR
+	MOV	byte [@CSRTYP],((0) and 0FFh)  ; Set for off cursor
+	CALL	@SETCSR  ; Ensure that the cursor is off
+	MOV	DH,byte [@CSRX]  ; Set DH=true posn(not width truncated)
+	TEST	byte [@ESCFLG],((255) and 0FFh)
+	JNZ	@SCNDRV@_DOESC  ; BRIF in middle of escape sequence
+	CMP	AL,((27) and 0FFh)
+	JZ	@SCNDRV@_DOESC
+@SCNDRV@_CTLDS0:
 
-CTLDP0:
-CTLDP1:
-	EXTRN	EDTMAP:NEAR,PRTMAP:NEAR
-	TEST	BYTE PTR F_EDIT,LOW 377O	; Test for Screen Edit mode
-	JZ	CTLPRT		; BRIF not edit mode
-	CMP	AH,LOW 1D	; Set PSW.C if two byte character
-	CMC	
-	CALL	EDTMAP		; Map edit function/output character code
-	JMP	CTLEDT
+@SCNDRV@_CTLDP0:
+@SCNDRV@_CTLDP1:
+; EXTRN	EDTMAP:NEAR,PRTMAP:NEAR
+	TEST	byte [@F_EDIT],((255) and 0FFh)  ; Test for Screen Edit mode
+	JZ	@SCNDRV@_CTLPRT  ; BRIF not edit mode
+	CMP	AH,((1) and 0FFh)  ; Set PSW.C if two byte character
+	CMC
+	CALL	@EDTMAP  ; Map edit function/output character code
+	JMP	@SCNDRV@_CTLEDT
 
-CTLPRT:	CMP	AH,LOW 1D	; Set PSW.C if two byte character
-	CMC	
-	CALL	PRTMAP		; Map print function/output character codes
-CTLEDT:	JZ	CTLDPY		; Ignore this character
-				; Print or perform the editor function
-	CMP	AH,LOW 255D	; Is it an editor function (&HFF)?
-	JNZ	CTLDSX		; No - print the character
-	XOR	AH,AH		; Clear (no longer needed) editor function flag
-	CMP	AL,LOW 177O	; Delete function?
-	JNZ	CTLNDL		; BRIF not DEL
-	MOV	AL,LOW " "	; DEL code
-CTLNDL:	CMP	AL,LOW 255D
-	JNZ	CTLNMK		; BRIF not "mark line for deletion"
+@SCNDRV@_CTLPRT:	CMP	AH,((1) and 0FFh)  ; Set PSW.C if two byte character
+	CMC
+	CALL	@PRTMAP  ; Map print function/output character codes
+@SCNDRV@_CTLEDT:	JZ	@SCNDRV@_CTLDPY  ; Ignore this character
+; Print or perform the editor function
+	CMP	AH,((255) and 0FFh)  ; Is it an editor function (&HFF)?
+	JNZ	@SCNDRV@_CTLDSX  ; No - print the character
+	XOR	AH,AH  ; Clear (no longer needed) editor function flag
+	CMP	AL,((127) and 0FFh)  ; Delete function?
+	JNZ	@SCNDRV@_CTLNDL  ; BRIF not DEL
+	MOV	AL,((" ") and 0FFh)  ; DEL code
+@SCNDRV@_CTLNDL:	CMP	AL,((255) and 0FFh)
+	JNZ	@SCNDRV@_CTLNMK  ; BRIF not "mark line for deletion"
 	PUSH	AX
 	PUSH	BX
-	CALL	SCNRDT
-	MOV	BX,WORD PTR TRMCUR
-	OR	BYTE PTR LINTTB-1[BX],LOW OFFSET TRMNUL	; Set "not for input" flag on this line
+	CALL	@SCNRDT
+	MOV	BX,word [@TRMCUR]
+	OR	byte [@LINTTB-1+BX],((@TRMNUL) and 0FFh)  ; Set "not for input" flag on this line
 	POP	BX
 	POP	AX
 ;       STC
-	RET	
-CTLNMK:	CMP	AL,LOW OFFSET " "+1	; Test for legal function code
-	JNB	CTLDPY		; Ignore this code
+	RET
+@SCNDRV@_CTLNMK:	CMP	AL,((" "+1) and 0FFh)  ; Test for legal function code
+	JNB	@SCNDRV@_CTLDPY  ; Ignore this code
 	PUSH	AX
-	CALL	CTLIRS		; Possibly reset insert flag
-	ADD	AX,AX		; Two bytes per entry
+	CALL	@SCNDRV@_CTLIRS  ; Possibly reset insert flag
+	ADD	AX,AX  ; Two bytes per entry
 	MOV	BX,AX
-	MOV	AX,OFFSET CTLDPX
-	PUSH	AX		; Put return on stack
-	MOV	AX,WORD PTR FUNTAB[BX]
-	PUSH	AX		; Put routine address on stack
-CTLDSX:	CLC	
-	RET			; Go do control routine
+	MOV	AX,@SCNDRV@_CTLDPX
+	PUSH	AX  ; Put return on stack
+	MOV	AX,word [cs:@SCNDRV@_FUNTAB+BX]
+	PUSH	AX  ; Put routine address on stack
+@SCNDRV@_CTLDSX:	CLC
+	RET  ; Go do control routine
 ;** *** UPDATE CURRENT_POSN, RETURN
-CTLDPX:	MOV	BYTE PTR CSRY,DL
-	MOV	BYTE PTR CSRX,DH	; Update cursor posn
+@SCNDRV@_CTLDPX:	MOV	byte [@CSRY],DL
+	MOV	byte [@CSRX],DH  ; Update cursor posn
 	POP	AX
-	SUB	AL,LOW OFFSET CHRRET
-	MOV	BYTE PTR F_CRET,AL	; F.CRET = 0 if character was Carriage return
-CTLDPY:
-	STC	
-CTLIGN:
-CTLDPZ:	RET	
+	SUB	AL,((@SCNDRV@_CHRRET) and 0FFh)
+	MOV	byte [@F_CRET],AL  ; F.CRET = 0 if character was Carriage return
+@SCNDRV@_CTLDPY:
+	STC
+@SCNDRV@_CTLIGN:
+@SCNDRV@_CTLDPZ:	RET
 ;** ESCAPE SEQUENCE PROCESSING
-DOESC:	CALL	SCROUT		; Returns carry set if continuation of escape sequence
-	SBB	AL,AL		; If ESC sequence, AL=FF else AL=0
-	MOV	BYTE PTR ESCFLG,AL	; Set/Reset flag
-	JMP	SHORT CTLDPY
+@SCNDRV@_DOESC:	CALL	@SCROUT  ; Returns carry set if continuation of escape sequence
+	SBB	AL,AL  ; If ESC sequence, AL=FF else AL=0
+	MOV	byte [@ESCFLG],AL  ; Set/Reset flag
+	JMP	@SCNDRV@_CTLDPY
 ;** END SUBROUTINE CTLDSP
 
 ;THE CONTROL CHARACTERS WHICH RESET INSERT FLAG ARE IN TABLE BELOW:
-;
-CTLITB:
-	DB	OFFSET CHRLDL	; LINE_DELETE
-	DB	OFFSET CHRERA	; ERASE_SCREEN
-	DB	OFFSET CHRFDW	; FORWARD_WORD
-	DB	OFFSET CHRBKW	; BACKWARD_WORD
-	DB	OFFSET CHRAPP	; APPEND_TO_LINE
-	DB	OFFSET CHREDT	; EDIT_PREVIOUS_LINE
-	DB	OFFSET CHRCLE	; CLEAR_TO_END
-	DB	OFFSET CHRBEL	; BELL
-	DB	OFFSET CHRHOM	; HOME
-	DB	OFFSET CHRADV	; CURSOR_ADV
-	DB	OFFSET CHRREG	; CURSOR_REG
-	DB	OFFSET CHRUP	; CURSOR_UP
-	DB	OFFSET CHRDWN	; CURSOR_DOWN
-	CTLCNT=$-CTLITB
+
+@SCNDRV@_CTLITB:
+	DB	@SCNDRV@_CHRLDL  ; LINE_DELETE
+	DB	@SCNDRV@_CHRERA  ; ERASE_SCREEN
+	DB	@SCNDRV@_CHRFDW  ; FORWARD_WORD
+	DB	@SCNDRV@_CHRBKW  ; BACKWARD_WORD
+	DB	@SCNDRV@_CHRAPP  ; APPEND_TO_LINE
+	DB	@SCNDRV@_CHREDT  ; EDIT_PREVIOUS_LINE
+	DB	@SCNDRV@_CHRCLE  ; CLEAR_TO_END
+	DB	@SCNDRV@_CHRBEL  ; BELL
+	DB	@SCNDRV@_CHRHOM  ; HOME
+	DB	@SCNDRV@_CHRADV  ; CURSOR_ADV
+	DB	@SCNDRV@_CHRREG  ; CURSOR_REG
+	DB	@SCNDRV@_CHRUP  ; CURSOR_UP
+	DB	@SCNDRV@_CHRDWN  ; CURSOR_DOWN
+	@SCNDRV@_CTLCNT=$-@SCNDRV@_CTLITB
 
 ;SUBROUTINE CTLIRS              ; Reset insert flag for specified characters
 ;**                 on entry:   AL=character
 ;**                 on exit:    DI garbaged
 ;**
-CTLIRS:	PUSH	AX
+@SCNDRV@_CTLIRS:	PUSH	AX
 	PUSH	BX
 	PUSH	CX
 	PUSH	DI
 ;** IF (SPECIAL_ACTION(CTLKEY))
-	MOV	DI,OFFSET CTLITB	; DI= [control char table]
-	MOV	CX,OFFSET CTLCNT	; CX= count of entries in table
+	MOV	DI,@SCNDRV@_CTLITB  ; DI= [control char table]
+	MOV	CX,@SCNDRV@_CTLCNT  ; CX= count of entries in table
 	MOV	BX,CX
 	PUSH	ES
-	PUSH	CS		; Scan in code segment
+	PUSH	CS  ; Scan in code segment
 	POP	ES
-	CLD			; Scan forward
- REPNE	SCASB			; Scan for character in table
+	CLD  ; Scan forward
+ REPNE	SCASB  ; Scan for character in table
 	POP	ES
-	JNE	INCNOT		; BRIF did not find the control character
+	JNE	@SCNDRV@_INCNOT  ; BRIF did not find the control character
 ;** *** F.INSRT=FALSE
-	MOV	BYTE PTR F_INST,LOW 0	; Reset insert flag
-INCNOT:	POP	DI
+	MOV	byte [@F_INST],((0) and 0FFh)  ; Reset insert flag
+@SCNDRV@_INCNOT:	POP	DI
 	POP	CX
 	POP	BX
 	POP	AX
-	RET	
+	RET
 ;** END SUBROUTINE CTLIRS
 ;** *** END
 
-	SUBTTL  CONTROL CHARACTER ROUTINES - Cursor movement by character, line and TAB
-
-
+; SUBTTL  CONTROL CHARACTER ROUTINES - Cursor movement by character, line and TAB
 
 ;The control character routines are entered with DH=current column and
 ;   DL=current line. They return updated posn in the same registers. They
@@ -1181,561 +1141,548 @@ INCNOT:	POP	DI
 ;   line. When the cursor leaves a logical line, the FSTPOS and LSTPOS values
 ;   do not change. If the cursor is then moved back onto the original logical
 ;   line, the values are updated once more.
-;
+
 ;Cursor advance
-WCSADV:	CALL	CSRADV		; Advance cursor
-	JB	WCSABT		; BRIF can't do, quit
+@SCNDRV@_WCSADV:	CALL	@SCNDRV@_CSRADV  ; Advance cursor
+	JB	@SCNDRV@_WCSABT  ; BRIF can't do, quit
 ;       CALL    SCNRDT          ; AH=end of this physical, AL=terminator
 ;       CMPB    DH,AH
 ;If cursor beyond previously printed data, don't update LSTCOL
 ;       JAE     WCSABT          ; BRIF not to left of line terminator posn
 ;If cursor beyond previous LSTPOS and on same logical, update LSTPOS
-UPDPOS:	PUSH	DX
-	DEC	DH		; LSTCOL is to left of cursor
-	CMP	DL,BYTE PTR LSTLIN
-	JB	UPDPS3		; BRIF not new LSTPOS
-	JZ	UPDPS2		; BRIF on same line, possibly update LSTPOS
+@SCNDRV@_UPDPOS:	PUSH	DX
+	DEC	DH  ; LSTCOL is to left of cursor
+	CMP	DL,byte [@LSTLIN]
+	JB	@SCNDRV@_UPDPS3  ; BRIF not new LSTPOS
+	JZ	@SCNDRV@_UPDPS2  ; BRIF on same line, possibly update LSTPOS
 	PUSH	DX
-	CALL	LSTART		; Get start line of current logical
-	CMP	DL,BYTE PTR LSTLIN
+	CALL	@SCNDRV@_LSTART  ; Get start line of current logical
+	CMP	DL,byte [@LSTLIN]
 	POP	DX
-	JA	UPDPS3		; BRIF LSTPOS not on current logical line
+	JA	@SCNDRV@_UPDPS3  ; BRIF LSTPOS not on current logical line
 ;LSTPOS on current logical, previous physical
-	MOV	BYTE PTR LSTLIN,DL	; Set LSTPOS to current
-	MOV	BYTE PTR LSTCOL,DH
-UPDPS2:	CMP	DH,BYTE PTR LSTCOL
-	JBE	UPDPS3		; BRIF not new last posn
-	MOV	BYTE PTR LSTCOL,DH	; Set new last posn
+	MOV	byte [@LSTLIN],DL  ; Set LSTPOS to current
+	MOV	byte [@LSTCOL],DH
+@SCNDRV@_UPDPS2:	CMP	DH,byte [@LSTCOL]
+	JBE	@SCNDRV@_UPDPS3  ; BRIF not new last posn
+	MOV	byte [@LSTCOL],DH  ; Set new last posn
 ;If cursor before previous FSTPOS and on same logical, update FSTPOS
-UPDPS3:	INC	DH		; Restore column
-	CMP	DL,BYTE PTR FSTLIN
-	JNZ	UPDPSX		; BRIF not on same line as first position
-	CMP	DH,BYTE PTR FSTCOL
-	JAE	UPDPSX		; BRIF not new first position
-	MOV	BYTE PTR FSTCOL,DH	; Set new first position to current position
-UPDPSX:	POP	DX
-WCSABT:	RET	
+@SCNDRV@_UPDPS3:	INC	DH  ; Restore column
+	CMP	DL,byte [@FSTLIN]
+	JNZ	@SCNDRV@_UPDPSX  ; BRIF not on same line as first position
+	CMP	DH,byte [@FSTCOL]
+	JAE	@SCNDRV@_UPDPSX  ; BRIF not new first position
+	MOV	byte [@FSTCOL],DH  ; Set new first position to current position
+@SCNDRV@_UPDPSX:	POP	DX
+@SCNDRV@_WCSABT:	RET
 
 ;Cursor regress
-WCSREG:	CALL	CSRREG		; Move cursor
-	JB	WCSABT		; Can't move, quit
-WCSRET:	CALL	SCNRDT
+@SCNDRV@_WCSREG:	CALL	@SCNDRV@_CSRREG  ; Move cursor
+	JB	@SCNDRV@_WCSABT  ; Can't move, quit
+@SCNDRV@_WCSRET:	CALL	@SCNRDT
 	CMP	AH,DH
-	JNB	UPDPOS		; Within logical, update FSTPOS, LSTPOS, return
+	JNB	@SCNDRV@_UPDPOS  ; Within logical, update FSTPOS, LSTPOS, return
 ;Cursor to right of line terminator, don't update LSTCOL
-	JMP	SHORT WCSABT	; Return
+	JMP	@SCNDRV@_WCSABT  ; Return
 
 ;Cursor up
-WCSUP:	CALL	CSRUP		; Move cursor
-	JNB	WCSRET		; BRIF successful, possibly update FSTPOS, LSTPOS
-	RET			; Unsuccessful, return(NOP)
+@SCNDRV@_WCSUP:	CALL	@SCNDRV@_CSRUP  ; Move cursor
+	JNB	@SCNDRV@_WCSRET  ; BRIF successful, possibly update FSTPOS, LSTPOS
+	RET  ; Unsuccessful, return(NOP)
 
 ;Cursor down
-WCSDWN:	CALL	CSRDWN		; Move cursor
-	JNB	WCSRET		; BRIF successful, possibly update FSTPOS, LSTPOS
-	RET			; Unsuccessful, return(NOP)
+@SCNDRV@_WCSDWN:	CALL	@SCNDRV@_CSRDWN  ; Move cursor
+	JNB	@SCNDRV@_WCSRET  ; BRIF successful, possibly update FSTPOS, LSTPOS
+	RET  ; Unsuccessful, return(NOP)
 
 ;TAB                            ; Move cursor to next TAB stop
-;
-LTAB:	TEST	BYTE PTR F_INST,LOW 377O
-	JZ	LTABL		; BRIF not insert TAB
-;Insert spaces until CSRX is at TAB stop or LINLEN
-LTABIL:	MOV	AX," "
-	CALL	SCNOUT		; Insert a blank
-	MOV	DL,BYTE PTR CSRY
-	MOV	DH,BYTE PTR CSRX
-	CMP	DH,BYTE PTR LINLEN
-	JA	LTABZ		; All done, at end of line
-	DEC	DH
-	TEST	DH,LOW 7O
-	JNZ	LTABIL		; Keep inserting
-	INC	DH
-	JMP	SHORT LTABZ	; All done, at TAB stop
-;Non-insert TAB, just pass over characters
-LTABL:	CMP	DH,BYTE PTR LINLEN
-	JAE	LTABX0		; BRIF need to wrap
-	INC	DH
-	TEST	DH,LOW 7O
-	JNZ	LTABL
-	INC	DH
-	JMP	SHORT LTABX	; BRIF reached good posn
-LTABX0:	CMP	DL,BYTE PTR WDOBOT
-	JAE	LTABZ		; BRIF no room to end of page
-	INC	DL
-	MOV	DH,BYTE PTR WDOLFT	; Else move to start of next line
-LTABX:	CALL	UPDPOS		; Update LSTPOS
-LTABZ:	RET	
-	SUBTTL  CONTROL CHARACTER ROUTINES - Cursor movement by word
 
+@SCNDRV@_LTAB:	TEST	byte [@F_INST],((255) and 0FFh)
+	JZ	@SCNDRV@_LTABL  ; BRIF not insert TAB
+;Insert spaces until CSRX is at TAB stop or LINLEN
+@SCNDRV@_LTABIL:	MOV	AX," "
+	CALL	@SCNOUT  ; Insert a blank
+	MOV	DL,byte [@CSRY]
+	MOV	DH,byte [@CSRX]
+	CMP	DH,byte [@LINLEN]
+	JA	@SCNDRV@_LTABZ  ; All done, at end of line
+	DEC	DH
+	TEST	DH,((7) and 0FFh)
+	JNZ	@SCNDRV@_LTABIL  ; Keep inserting
+	INC	DH
+	JMP	@SCNDRV@_LTABZ  ; All done, at TAB stop
+;Non-insert TAB, just pass over characters
+@SCNDRV@_LTABL:	CMP	DH,byte [@LINLEN]
+	JAE	@SCNDRV@_LTABX0  ; BRIF need to wrap
+	INC	DH
+	TEST	DH,((7) and 0FFh)
+	JNZ	@SCNDRV@_LTABL
+	INC	DH
+	JMP	@SCNDRV@_LTABX  ; BRIF reached good posn
+@SCNDRV@_LTABX0:	CMP	DL,byte [@WDOBOT]
+	JAE	@SCNDRV@_LTABZ  ; BRIF no room to end of page
+	INC	DL
+	MOV	DH,byte [@WDOLFT]  ; Else move to start of next line
+@SCNDRV@_LTABX:	CALL	@SCNDRV@_UPDPOS  ; Update LSTPOS
+@SCNDRV@_LTABZ:	RET
+; SUBTTL  CONTROL CHARACTER ROUTINES - Cursor movement by word
 
 ;Advance cursor to beginning of next word within screen
-FWDWRD:	PUSH	DX
-	PUSH	WORD PTR LSTLIN
-	CMP	DL,BYTE PTR LSTLIN
-	JNZ	FWDWR0		; BRIF LSTPOS not on this line
-	CMP	DH,BYTE PTR LSTCOL
-	JB	FWDWR0		; BRIF within logical line
-	MOV	BYTE PTR LSTLIN,LOW 377O	; Ignore LSTPOS in scan
-FWDWR0:	CLC	
-FWDWR1:	CALL	FWDWDL		; Try within logical
-	JB	FWDWR2		; BRIF unsuccessful
-	POP	WORD PTR LSTLIN
-	CALL	UPDPOS
-	POP	AX		; Remove old posn from stack
-	RET	
+@SCNDRV@_FWDWRD:	PUSH	DX
+	PUSH	word [@LSTLIN]
+	CMP	DL,byte [@LSTLIN]
+	JNZ	@SCNDRV@_FWDWR0  ; BRIF LSTPOS not on this line
+	CMP	DH,byte [@LSTCOL]
+	JB	@SCNDRV@_FWDWR0  ; BRIF within logical line
+	MOV	byte [@LSTLIN],((255) and 0FFh)  ; Ignore LSTPOS in scan
+@SCNDRV@_FWDWR0:	CLC
+@SCNDRV@_FWDWR1:	CALL	@SCNDRV@_FWDWDL  ; Try within logical
+	JB	@SCNDRV@_FWDWR2  ; BRIF unsuccessful
+	POP	word [@LSTLIN]
+	CALL	@SCNDRV@_UPDPOS
+	POP	AX  ; Remove old posn from stack
+	RET
 ;Reached end of logical line, try next logical
-FWDWR2:	CALL	CSRDWN
-	JB	FWDWRZ		; BRIF end of screen
-	MOV	DH,BYTE PTR WDOLFT	; Start scan again at next line
-	STC	
-	JMP	SHORT FWDWR1	; Continue scan
+@SCNDRV@_FWDWR2:	CALL	@SCNDRV@_CSRDWN
+	JB	@SCNDRV@_FWDWRZ  ; BRIF end of screen
+	MOV	DH,byte [@WDOLFT]  ; Start scan again at next line
+	STC
+	JMP	@SCNDRV@_FWDWR1  ; Continue scan
 ;Unsuccessful, return cursor to original posn
-FWDWRZ:	POP	WORD PTR LSTLIN
+@SCNDRV@_FWDWRZ:	POP	word [@LSTLIN]
 	POP	DX
-	RET	
+	RET
 
-FWDWD0:	CALL	LCSADV
-	JB	FWDWD3		; At end of logical line
+@SCNDRV@_FWDWD0:	CALL	@SCNDRV@_LCSADV
+	JB	@SCNDRV@_FWDWD3  ; At end of logical line
 ;Advance cursor to beginning of next word within logical line
-FWDWDL:	JB	FWDWD2		; Start as though between words
-	CALL	ANCHK		; Check if current char is within word
-	JNB	FWDWD0		; BRIF still within previous word
+@SCNDRV@_FWDWDL:	JB	@SCNDRV@_FWDWD2  ; Start as though between words
+	CALL	@SCNDRV@_ANCHK  ; Check if current char is within word
+	JNB	@SCNDRV@_FWDWD0  ; BRIF still within previous word
 ;At space between words
-FWDWD1:	CALL	LCSADV
-	JB	FWDWD3		; At end of logical line, check next logical
-FWDWD2:	CALL	ANCHK
-	JB	FWDWD1
-FWDWDX:	RET			; Return, DX=posn of new word or end of logical line
-FWDWD3:	JNZ	FWDWDX		; BRIF not stop at LSTPOS
+@SCNDRV@_FWDWD1:	CALL	@SCNDRV@_LCSADV
+	JB	@SCNDRV@_FWDWD3  ; At end of logical line, check next logical
+@SCNDRV@_FWDWD2:	CALL	@SCNDRV@_ANCHK
+	JB	@SCNDRV@_FWDWD1
+@SCNDRV@_FWDWDX:	RET  ; Return, DX=posn of new word or end of logical line
+@SCNDRV@_FWDWD3:	JNZ	@SCNDRV@_FWDWDX  ; BRIF not stop at LSTPOS
 ;Stopped at LSTPOS, continue scan to end of physical line
 	CMP	AH,DH
-	JA	FWDWD4		; BRIF more this line
-	STC	
-	RET	
-FWDWD4:	MOV	BYTE PTR LSTLIN,LOW 377O	; Ignore LSTPOS from here on
-	JMP	SHORT FWDWD1	; Since crossed LSTPOS, passed end of current word
+	JA	@SCNDRV@_FWDWD4  ; BRIF more this line
+	STC
+	RET
+@SCNDRV@_FWDWD4:	MOV	byte [@LSTLIN],((255) and 0FFh)  ; Ignore LSTPOS from here on
+	JMP	@SCNDRV@_FWDWD1  ; Since crossed LSTPOS, passed end of current word
 
 ;Regress cursor to start of previous word
-BCKWRD:	PUSH	WORD PTR FSTCOL
+@SCNDRV@_BCKWRD:	PUSH	word [@FSTCOL]
 	PUSH	DX
-	CMP	DH,BYTE PTR FSTLIN
-	JNZ	BCKWD2
-	CMP	DH,BYTE PTR FSTCOL
-	JA	BCKWD2
-	MOV	BYTE PTR FSTLIN,LOW 0
+	CMP	DH,byte [@FSTLIN]
+	JNZ	@SCNDRV@_BCKWD2
+	CMP	DH,byte [@FSTCOL]
+	JA	@SCNDRV@_BCKWD2
+	MOV	byte [@FSTLIN],((0) and 0FFh)
 ;Assume passed beginning of current word, continue to start of next
-BCKWD2:	CALL	LCSREG
-	JB	BCKWD7		; BRIF At start of line
-BCKWD4:	CALL	ANCHK
-	JB	BCKWD2		; BRIF still between words
+@SCNDRV@_BCKWD2:	CALL	@SCNDRV@_LCSREG
+	JB	@SCNDRV@_BCKWD7  ; BRIF At start of line
+@SCNDRV@_BCKWD4:	CALL	@SCNDRV@_ANCHK
+	JB	@SCNDRV@_BCKWD2  ; BRIF still between words
 ;Scanning previous word, any termination is good
-BCKWD5:	CALL	LCSREG
-	JB	BCKWD6		; BRIF at beginning of line, found previous word
-	CALL	ANCHK
-	JNB	BCKWD5		; BRIF not at beginning of word
-	CALL	CSRADV		; Advance back to start of word
-BCKWD6:	POP	AX
-	PUSH	DX		; Push new posn on stack
-BCKWDX:	POP	DX
-	POP	WORD PTR FSTCOL
-	CALL	UPDPOS
-	RET			; Return, DL=posn of previous word
-BCKWD7:	JNZ	BCKWD8		; BRIF not stop at FSTPOS
-	MOV	BYTE PTR FSTLIN,LOW 0	; Ignore FSTPOS from here on
-	JMP	SHORT BCKWD2	; Since passed begginning of logical, between words
-BCKWD8:	CALL	CSRUP		; Try previous logical line
-	JB	BCKWDX		; At beginning of screen
-	CALL	SCNRDT		; Read previous line teminator
+@SCNDRV@_BCKWD5:	CALL	@SCNDRV@_LCSREG
+	JB	@SCNDRV@_BCKWD6  ; BRIF at beginning of line, found previous word
+	CALL	@SCNDRV@_ANCHK
+	JNB	@SCNDRV@_BCKWD5  ; BRIF not at beginning of word
+	CALL	@SCNDRV@_CSRADV  ; Advance back to start of word
+@SCNDRV@_BCKWD6:	POP	AX
+	PUSH	DX  ; Push new posn on stack
+@SCNDRV@_BCKWDX:	POP	DX
+	POP	word [@FSTCOL]
+	CALL	@SCNDRV@_UPDPOS
+	RET  ; Return, DL=posn of previous word
+@SCNDRV@_BCKWD7:	JNZ	@SCNDRV@_BCKWD8  ; BRIF not stop at FSTPOS
+	MOV	byte [@FSTLIN],((0) and 0FFh)  ; Ignore FSTPOS from here on
+	JMP	@SCNDRV@_BCKWD2  ; Since passed begginning of logical, between words
+@SCNDRV@_BCKWD8:	CALL	@SCNDRV@_CSRUP  ; Try previous logical line
+	JB	@SCNDRV@_BCKWDX  ; At beginning of screen
+	CALL	@SCNRDT  ; Read previous line teminator
 	OR	AH,AH
-	JZ	BCKWD8		; Previous line is null, try next previous
+	JZ	@SCNDRV@_BCKWD8  ; Previous line is null, try next previous
 	MOV	DH,AH
-	JMP	SHORT BCKWD4	; Continue scan
-	SUBTTL  CONTROL CHARACTER ROUTINES - Screen home, truncate and clear
+	JMP	@SCNDRV@_BCKWD4  ; Continue scan
+; SUBTTL  CONTROL CHARACTER ROUTINES - Screen home, truncate and clear
 
+; EXTRN	BEEP:NEAR
+@SCNDRV@_CBEEP:	CALL	@BEEP  ; Sound Bell
+	JMP	@SCNPOS  ; return current cursor location
 
-	EXTRN	BEEP:NEAR
-CBEEP:	CALL	BEEP		; Sound Bell
-	JMP	SCNPOS		; return current cursor location
-
-	EXTRN	CLRSCN:NEAR
+; EXTRN	CLRSCN:NEAR
 ;Clear the screen
-CCLRSN:
-	CLC			; no-carry = internal parameter
-	MOV	AL,LOW 2	; specify text only
-	CALL	CLRSCN		; OEM supplied Clear-Screen Routine
-				;fall into WHOME
+@SCNDRV@_CCLRSN:
+	CLC  ; no-carry = internal parameter
+	MOV	AL,((2) and 0FFh)  ; specify text only
+	CALL	@CLRSCN  ; OEM supplied Clear-Screen Routine
+;fall into WHOME
 
 ;Home the cursor
-WHOME:	MOV	DL,BYTE PTR WDOTOP
-	MOV	DH,BYTE PTR WDOLFT
-	RET	
+@SCNDRV@_WHOME:	MOV	DL,byte [@WDOTOP]
+	MOV	DH,byte [@WDOLFT]
+	RET
 
 ;Erase to the end of the screen
-WERASE:	CALL	PLINIT		; Clear current physical to end of line
+@SCNDRV@_WERASE:	CALL	@SCNDRV@_PLINIT  ; Clear current physical to end of line
 	PUSH	DX
-	MOV	DH,BYTE PTR WDOLFT	; Clear rest of lines from left margin
+	MOV	DH,byte [@WDOLFT]  ; Clear rest of lines from left margin
 ;WHILE POSN .LTE. WDOBOT
 ;** IF DATA_EXISTS(POSN) THEN INITIALIZE LINE
-WERAS0:	INC	DL
-	CMP	DL,BYTE PTR WDOBOT
-	JA	WERASX		; Beyond window, exit
-	CALL	PLINIT		; Clear this line
-	JMP	SHORT WERAS0	; Init next line
-WERASX:	POP	DX		; Return DX=cursor posn
-	RET	
-	SUBTTL  CONTROL CHARACTER ROUTINES - Line truncate and delete
-
-
+@SCNDRV@_WERAS0:	INC	DL
+	CMP	DL,byte [@WDOBOT]
+	JA	@SCNDRV@_WERASX  ; Beyond window, exit
+	CALL	@SCNDRV@_PLINIT  ; Clear this line
+	JMP	@SCNDRV@_WERAS0  ; Init next line
+@SCNDRV@_WERASX:	POP	DX  ; Return DX=cursor posn
+	RET
+; SUBTTL  CONTROL CHARACTER ROUTINES - Line truncate and delete
 
 ;Delete entire logical line
-LDELET:	CALL	LSTART		; Get start of logical line in DX
+@SCNDRV@_LDELET:	CALL	@SCNDRV@_LSTART  ; Get start of logical line in DX
 
 ;Truncate line from posn in DX
-LTRUNC:	PUSH	DX
-	CALL	SCNRTL		; AH=last valid data on physical line
-	PUSHF	
-	STC			; Indicate don't clear line by scrolling
-	CALL	LCLEAR		; Clear this physical line
-	JB	LTRUN9		; Reached LSTPOS, all done
+@SCNDRV@_LTRUNC:	PUSH	DX
+	CALL	@SCNDRV@_SCNRTL  ; AH=last valid data on physical line
+	PUSHF
+	STC  ; Indicate don't clear line by scrolling
+	CALL	@SCNDRV@_LCLEAR  ; Clear this physical line
+	JB	@SCNDRV@_LTRUN9  ; Reached LSTPOS, all done
 	INC	DL
 ;"Suck up" remaining physical lines attached to current logical
-LTRUN1:	POPF	
-	JB	LTRUNX		; Reached end of logical line
-	CALL	SCNRTL
-	PUSHF	
-	MOV	DH,BYTE PTR WDOLFT
-	CLC	
-	CALL	LCLEAR		; Clear this line from start of line
-	JB	LTRUN9		; Reached LSTPOS, all done
-	JMP	SHORT LTRUN1
-LTRUN9:	POPF	
-LTRUNX:	POP	DX
-	RET	
+@SCNDRV@_LTRUN1:	POPF
+	JB	@SCNDRV@_LTRUNX  ; Reached end of logical line
+	CALL	@SCNDRV@_SCNRTL
+	PUSHF
+	MOV	DH,byte [@WDOLFT]
+	CLC
+	CALL	@SCNDRV@_LCLEAR  ; Clear this line from start of line
+	JB	@SCNDRV@_LTRUN9  ; Reached LSTPOS, all done
+	JMP	@SCNDRV@_LTRUN1
+@SCNDRV@_LTRUN9:	POPF
+@SCNDRV@_LTRUNX:	POP	DX
+	RET
 
 ;Clear current physical to end of physical or LSTPOS, whichever is smallest
 ; (DH,DL)=start posn, AH=TERM_POSN, if CF=1, don't scroll
-LCLEAR:	PUSHF	
-	CMP	DL,BYTE PTR LSTLIN
-	JZ	LCLER2		; BRIF clear up to LSTPOS
-LCLER0:	CMP	DH,BYTE PTR WDORGT
-	JA	LCLER5		; BRIF beyond end of physical(just exit)
-	POPF	
-	JNB	LCLER1		; BRIF clear line by scroll
-	CALL	PLINIT		; Clear this physical line
-	CLC	
-	RET	
-LCLER1:	CALL	SCRLU0		; Scroll up from bottom to current line
-	CLC	
-	RET	
-LCLER2:	POPF	
-	CALL	PLINIT
-	STC	
-	RET	
-LCLER5:	POPF	
-	CLC	
-	RET	
+@SCNDRV@_LCLEAR:	PUSHF
+	CMP	DL,byte [@LSTLIN]
+	JZ	@SCNDRV@_LCLER2  ; BRIF clear up to LSTPOS
+@SCNDRV@_LCLER0:	CMP	DH,byte [@WDORGT]
+	JA	@SCNDRV@_LCLER5  ; BRIF beyond end of physical(just exit)
+	POPF
+	JNB	@SCNDRV@_LCLER1  ; BRIF clear line by scroll
+	CALL	@SCNDRV@_PLINIT  ; Clear this physical line
+	CLC
+	RET
+@SCNDRV@_LCLER1:	CALL	@SCNDRV@_SCRLU0  ; Scroll up from bottom to current line
+	CLC
+	RET
+@SCNDRV@_LCLER2:	POPF
+	CALL	@SCNDRV@_PLINIT
+	STC
+	RET
+@SCNDRV@_LCLER5:	POPF
+	CLC
+	RET
 
-
-	SUBTTL  CONTROL CHARACTER ROUTINES - Character and word delete
-
-
+; SUBTTL  CONTROL CHARACTER ROUTINES - Character and word delete
 
 ;Word delete
-;
-WDELET:
-	CMP	DH,BYTE PTR LINLEN
-	JBE	WDELT0		; BRIF on physical line
-	CALL	CSRADV		; Put cursor on next line
-	JB	WDELTZ		; BRIF at end of screen
-WDELT0:
-	CMP	DL,BYTE PTR LSTLIN	; **
-	JNZ	WDELT2		; **BRIF not on LSTPOS line
-	CMP	DH,BYTE PTR LSTCOL	; **
-	JAE	WDELTZ		; **BRIF at or beyond LSTPOS(don't do word delete)
-WDELT2:				; **
+
+@SCNDRV@_WDELET:
+	CMP	DH,byte [@LINLEN]
+	JBE	@SCNDRV@_WDELT0  ; BRIF on physical line
+	CALL	@SCNDRV@_CSRADV  ; Put cursor on next line
+	JB	@SCNDRV@_WDELTZ  ; BRIF at end of screen
+@SCNDRV@_WDELT0:
+	CMP	DL,byte [@LSTLIN]  ; **
+	JNZ	@SCNDRV@_WDELT2  ; **BRIF not on LSTPOS line
+	CMP	DH,byte [@LSTCOL]  ; **
+	JAE	@SCNDRV@_WDELTZ  ; **BRIF at or beyond LSTPOS(don't do word delete)
+@SCNDRV@_WDELT2:  ; **
 	PUSH	DX
-	CMP	DH,BYTE PTR LINLEN
-	JBE	WDELT4		; Good delete posn(within physical line)
-	CALL	LCSADV		; Advance cursor to next physical of logical
-WDELT4:	PUSH	DX
-	CLC	
-	PUSH	WORD PTR LSTLIN
-	CALL	FWDWDL		; Set (DH,DL)= start of next word or end of line
-	POP	WORD PTR LSTLIN
-	JNB	WDELT6		; BRIF found another word following
+	CMP	DH,byte [@LINLEN]
+	JBE	@SCNDRV@_WDELT4  ; Good delete posn(within physical line)
+	CALL	@SCNDRV@_LCSADV  ; Advance cursor to next physical of logical
+@SCNDRV@_WDELT4:	PUSH	DX
+	CLC
+	PUSH	word [@LSTLIN]
+	CALL	@SCNDRV@_FWDWDL  ; Set (DH,DL)= start of next word or end of line
+	POP	word [@LSTLIN]
+	JNB	@SCNDRV@_WDELT6  ; BRIF found another word following
 ;No word following, just delete to end of line
-	INC	DH		; Include terminator in delete
-WDELT6:	MOV	CX,DX
+	INC	DH  ; Include terminator in delete
+@SCNDRV@_WDELT6:	MOV	CX,DX
 	POP	DX
-	CMP	CL,BYTE PTR LSTLIN	; **
-	JB	WDELT8		; **BRIF not beyond LSTPOS line
-	JA	WDELT7		; **BRIF beyond LSTPOS line, use LSTPOS
-	CMP	CH,BYTE PTR LSTCOL	; **At LSTPOS line, check if column is OK
-	JB	WDELT8		; **BRIF before LSTPOS, column is OK
-WDELT7:	MOV	CX,WORD PTR LSTLIN	; **Use LSTPOS as end of delete
-	INC	CH		; **INC because delete is up to char before this posn
-WDELT8:				; **
+	CMP	CL,byte [@LSTLIN]  ; **
+	JB	@SCNDRV@_WDELT8  ; **BRIF not beyond LSTPOS line
+	JA	@SCNDRV@_WDELT7  ; **BRIF beyond LSTPOS line, use LSTPOS
+	CMP	CH,byte [@LSTCOL]  ; **At LSTPOS line, check if column is OK
+	JB	@SCNDRV@_WDELT8  ; **BRIF before LSTPOS, column is OK
+@SCNDRV@_WDELT7:	MOV	CX,word [@LSTLIN]  ; **Use LSTPOS as end of delete
+	INC	CH  ; **INC because delete is up to char before this posn
+@SCNDRV@_WDELT8:  ; **
 	CMP	DL,CL
-	JNZ	WDELTC		; BRIF multiple line delete
-WDELT9:	SUB	CH,DH		; CH=chars to next word minus one
-	JBE	WDELTX		; BRIF no chars to delete
-	CALL	CDELLG		; Delete CH chars in this line
-WDELTX:	POP	DX
-WDELTZ:	RET	
-WDELTC:	INC	DL
-WDELTD:	PUSH	DX
+	JNZ	@SCNDRV@_WDELTC  ; BRIF multiple line delete
+@SCNDRV@_WDELT9:	SUB	CH,DH  ; CH=chars to next word minus one
+	JBE	@SCNDRV@_WDELTX  ; BRIF no chars to delete
+	CALL	@SCNDRV@_CDELLG  ; Delete CH chars in this line
+@SCNDRV@_WDELTX:	POP	DX
+@SCNDRV@_WDELTZ:	RET
+@SCNDRV@_WDELTC:	INC	DL
+@SCNDRV@_WDELTD:	PUSH	DX
 	PUSH	CX
 ; Delete across physical lines, delete to end of this line
 	CMP	DL,CL
-	MOV	DH,BYTE PTR WDOLFT
-	JZ	WDELTE
-	CALL	SCNRTL
+	MOV	DH,byte [@WDOLFT]
+	JZ	@SCNDRV@_WDELTE
+	CALL	@SCNDRV@_SCNRTL
 	MOV	CH,AH
-	CALL	CDELPH		; Erase intervening line
+	CALL	@SCNDRV@_CDELPH  ; Erase intervening line
 	POP	CX
 	POP	DX
-	DEC	CL		; Each erase of intervening line brings CL closer
-	JMP	SHORT WDELTD
-WDELTE:	CMP	CH,BYTE PTR WDOLFT
-	JBE	WDELTF		; BRIF at begin of line
+	DEC	CL  ; Each erase of intervening line brings CL closer
+	JMP	@SCNDRV@_WDELTD
+@SCNDRV@_WDELTE:	CMP	CH,byte [@WDOLFT]
+	JBE	@SCNDRV@_WDELTF  ; BRIF at begin of line
 	DEC	CH
-	CALL	CDELLG		; Delete up to the next word on this line
-WDELTF:	POP	CX
+	CALL	@SCNDRV@_CDELLG  ; Delete up to the next word on this line
+@SCNDRV@_WDELTF:	POP	CX
 	POP	DX
-	DEC	DL		; Go back to original line
-	MOV	CH,BYTE PTR LINLEN
+	DEC	DL  ; Go back to original line
+	MOV	CH,byte [@LINLEN]
 	INC	CH
-	JMP	SHORT WDELT9	; Delete to end of line
-
-
+	JMP	@SCNDRV@_WDELT9  ; Delete to end of line
 
 ;Destructive back space
-;
-BAKSPC:
-	CALL	LCSREG		; Back space within logical line
-	CALL	SCNRTL
+
+@SCNDRV@_BAKSPC:
+	CALL	@SCNDRV@_LCSREG  ; Back space within logical line
+	CALL	@SCNDRV@_SCNRTL
 	CMP	DH,AH
-	JBE	CDELET		; BRIF current posn less than TERM_POSN
-	CMP	AH,BYTE PTR WDOLFT
-	JAE	BAKSP1		; BRIF not on null line
-	MOV	AH,BYTE PTR WDOLFT
-BAKSP1:	MOV	DH,AH		; If beyond terminator, set posn to terminator
+	JBE	@SCNDRV@_CDELET  ; BRIF current posn less than TERM_POSN
+	CMP	AH,byte [@WDOLFT]
+	JAE	@SCNDRV@_BAKSP1  ; BRIF not on null line
+	MOV	AH,byte [@WDOLFT]
+@SCNDRV@_BAKSP1:	MOV	DH,AH  ; If beyond terminator, set posn to terminator
 
 ;Delete character
-;
-CDELET:	MOV	CH,LOW 1	; Assume one byte char delete
-	CMP	DH,BYTE PTR LINLEN
-	JBE	CDELT1		; BRIF within physical line
-	RET	
-CDELT1:
+
+@SCNDRV@_CDELET:	MOV	CH,((1) and 0FFh)  ; Assume one byte char delete
+	CMP	DH,byte [@LINLEN]
+	JBE	@SCNDRV@_CDELT1  ; BRIF within physical line
+	RET
+@SCNDRV@_CDELT1:
 
 ;SUBROUTINE CDELLG:             ; Delete CH characters @(DH,DL) within logical
 ;                       On entry:   CH=count, CL= flag, (DH,DL)=posn
 ;                                   If CL is non-zero, remove null line from screen
-;
-CDELLG:	PUSH	DX
-	CALL	SCNRTL		; Get last valid char posn in AH
-	PUSHF	
-	CALL	CDELPH		; Delete characters from current physical
-				;   returns new term posn in AH
-	XOR	CL,CL		; CL is iteration counter
-	POPF	
-	MOV	AL,LOW OFFSET TRMEOL
-	JB	CDLGEX		; BRIF was EOL term'd, update terminator, exit
-	JNZ	CDLGWP		; BRIF line was WRAP or NULL_WRAP term'd, get
-				;       chars from next line
+
+@SCNDRV@_CDELLG:	PUSH	DX
+	CALL	@SCNDRV@_SCNRTL  ; Get last valid char posn in AH
+	PUSHF
+	CALL	@SCNDRV@_CDELPH  ; Delete characters from current physical
+;   returns new term posn in AH
+	XOR	CL,CL  ; CL is iteration counter
+	POPF
+	MOV	AL,((@TRMEOL) and 0FFh)
+	JB	@SCNDRV@_CDLGEX  ; BRIF was EOL term'd, update terminator, exit
+	JNZ	@SCNDRV@_CDLGWP  ; BRIF line was WRAP or NULL_WRAP term'd, get
+;       chars from next line
 ;Line was LF terminated, check for LF delete
 	CMP	AH,DH
-	MOV	AL,LOW OFFSET TRMLNF
-	JA	CDLGEX		; BRIF didn't delete LF, update terminator, exit
+	MOV	AL,((@TRMLNF) and 0FFh)
+	JA	@SCNDRV@_CDLGEX  ; BRIF didn't delete LF, update terminator, exit
 	OR	AH,AH
-	JZ	CDLGRT		; **BRIF entire line deleted and removed
+	JZ	@SCNDRV@_CDLGRT  ; **BRIF entire line deleted and removed
 	MOV	AH,DH
-	JMP	SHORT CDLWP1
+	JMP	@SCNDRV@_CDLWP1
 ;Need to get chars from next physical line at (AH,DL) posn to end of physical
-CDLGWP:	OR	AH,AH
-	JZ	CDLGRT		; BRIF entire line deleted and removed
+@SCNDRV@_CDLGWP:	OR	AH,AH
+	JZ	@SCNDRV@_CDLGRT  ; BRIF entire line deleted and removed
 	INC	AH
-CDLWP1:	CMP	DL,BYTE PTR LSTLIN	; **
-	JZ	CDLGRT		; **LSTPOS on this line, all done
-	PUSH	WORD PTR LSTLIN	; **Save current LSTPOS
-	CALL	CDUNWP		; Unwrap the characters desired returns terminator
-				;     in (AH,AL) and byte count in CH
-	CALL	SCNWTT		; Update terminator
+@SCNDRV@_CDLWP1:	CMP	DL,byte [@LSTLIN]  ; **
+	JZ	@SCNDRV@_CDLGRT  ; **LSTPOS on this line, all done
+	PUSH	word [@LSTLIN]  ; **Save current LSTPOS
+	CALL	@SCNDRV@_CDUNWP  ; Unwrap the characters desired returns terminator
+;     in (AH,AL) and byte count in CH
+	CALL	@SCNDRV@_SCNWTT  ; Update terminator
 	OR	CH,CH
-	JNZ	CDLWP2		; BRIF we have characters to unwrap
-	POP	AX		; Restore the stack
-	JMP	SHORT CDLGRT	; Return, all done
+	JNZ	@SCNDRV@_CDLWP2  ; BRIF we have characters to unwrap
+	POP	AX  ; Restore the stack
+	JMP	@SCNDRV@_CDLGRT  ; Return, all done
 ;Need to delete CH characters unwrapped from next line
-CDLWP2:	MOV	DH,BYTE PTR WDOLFT	; Unwrapped from start of line
-	INC	DL		; Next line
-	DEC	CL		; Update iteration counter
-	CALL	SCNRTL		; Read next lines terminator
+@SCNDRV@_CDLWP2:	MOV	DH,byte [@WDOLFT]  ; Unwrapped from start of line
+	INC	DL  ; Next line
+	DEC	CL  ; Update iteration counter
+	CALL	@SCNDRV@_SCNRTL  ; Read next lines terminator
 ;Need to restore LSTPOS to old value for character delete
-	MOV	DI,WORD PTR LSTLIN	; **Save current value of LSTPOS in SI
-	POP	WORD PTR LSTLIN	; **Restore value before CDUNWP so CDELPH works properly
-	PUSHF	
-	PUSH	DI		; **Save current "true" value of LSTPOS
-	XCHG	DI,AX		; **
-	CMP	AL,BYTE PTR LSTLIN	; **
-	PUSHF			; **
-	XCHG	DI,AX		; **
-	CALL	CDELPH		; Delete chars to end of line or LSTPOS
-	POPF			; **
-	POP	DI		; **
-	JZ	CDLGNC		; **BRIF CDUNWP did not change LSTPOS
-	MOV	WORD PTR LSTLIN,DI	; **Restore CDUNWP value of LSTPOS
-CDLGNC:	OR	AH,AH
-	JNZ	CDLGW1		; BRIF still chars on this line
-	POPF	
-	JNB	CDLGRT		; BRIF LF or wrap term'd, already removed
-CDLGNL:	DEC	DL
+	MOV	DI,word [@LSTLIN]  ; **Save current value of LSTPOS in SI
+	POP	word [@LSTLIN]  ; **Restore value before CDUNWP so CDELPH works properly
+	PUSHF
+	PUSH	DI  ; **Save current "true" value of LSTPOS
+	XCHG	DI,AX  ; **
+	CMP	AL,byte [@LSTLIN]  ; **
+	PUSHF  ; **
+	XCHG	DI,AX  ; **
+	CALL	@SCNDRV@_CDELPH  ; Delete chars to end of line or LSTPOS
+	POPF  ; **
+	POP	DI  ; **
+	JZ	@SCNDRV@_CDLGNC  ; **BRIF CDUNWP did not change LSTPOS
+	MOV	word [@LSTLIN],DI  ; **Restore CDUNWP value of LSTPOS
+@SCNDRV@_CDLGNC:	OR	AH,AH
+	JNZ	@SCNDRV@_CDLGW1  ; BRIF still chars on this line
+	POPF
+	JNB	@SCNDRV@_CDLGRT  ; BRIF LF or wrap term'd, already removed
+@SCNDRV@_CDLGNL:	DEC	DL
 	INC	CL
-	CALL	SCNRTL
-	JB	CDLGN0		; BRIF previous line EOL term'd, remove null line
-	JZ	CDLGRT		; BRIF previous line LF term'd, leave null line
-	MOV	AL,LOW OFFSET TRMEOL
-	CALL	SCNWTT		; Previous line was wrapped, terminate it and
-				;   remove null line
-CDLGN0:	INC	DL
+	CALL	@SCNDRV@_SCNRTL
+	JB	@SCNDRV@_CDLGN0  ; BRIF previous line EOL term'd, remove null line
+	JZ	@SCNDRV@_CDLGRT  ; BRIF previous line LF term'd, leave null line
+	MOV	AL,((@TRMEOL) and 0FFh)
+	CALL	@SCNDRV@_SCNWTT  ; Previous line was wrapped, terminate it and
+;   remove null line
+@SCNDRV@_CDLGN0:	INC	DL
 	DEC	CL
-	CALL	SCRLU0		; Remove null line by scrolling
-	JMP	SHORT CDLGRT	; All done
+	CALL	@SCNDRV@_SCRLU0  ; Remove null line by scrolling
+	JMP	@SCNDRV@_CDLGRT  ; All done
 
-CDLGW1:	POPF	
-	JB	CDLGEX		; BRIF at EOL, all done
-	JNZ	CDLGWP		; BRIF wrapped, unwrap chars from next line
+@SCNDRV@_CDLGW1:	POPF
+	JB	@SCNDRV@_CDLGEX  ; BRIF at EOL, all done
+	JNZ	@SCNDRV@_CDLGWP  ; BRIF wrapped, unwrap chars from next line
 ;We have terminator in (AH,AL), posn in (DH,DL)
-CDLGEX:	CALL	SCNWTT		; Update terminator
-CDLGRT:	ADD	CL,DL
+@SCNDRV@_CDLGEX:	CALL	@SCNDRV@_SCNWTT  ; Update terminator
+@SCNDRV@_CDLGRT:	ADD	CL,DL
 	POP	DX
 	MOV	DL,CL
-	RET	
+	RET
 
-
-
-CDUWXI:	MOV	CH,LOW 0	; Indicate no characters unwrapped
-	JMP	CDUWPX		; Indirect jump
+@SCNDRV@_CDUWXI:	MOV	CH,((0) and 0FFh)  ; Indicate no characters unwrapped
+	JMP	@SCNDRV@_CDUWPX  ; Indirect jump
 
 ;SUBROUTINE CDUNWP:             ; "Unwrap" chars from next line
 ;                       On entry:   (AH,DL)= destination
 ;                       On exit:    (AH,AL)= new line terminator
 ;                                   CH=nunber of bytes unwrapped
-;
-CDUNWP:	PUSH	BX
+
+@SCNDRV@_CDUNWP:	PUSH	BX
 	PUSH	CX
 	PUSH	DX
-	PUSH	WORD PTR TRMCUR
-	MOV	AL,LOW OFFSET TRMWRP
-	MOV	CH,BYTE PTR LINLEN
+	PUSH	word [@TRMCUR]
+	MOV	AL,((@TRMWRP) and 0FFh)
+	MOV	CH,byte [@LINLEN]
 	SUB	CH,AH
-	JB	CDUWXI		; BRIF no space to unwrap characters to, just exit
-	CMP	DL,BYTE PTR LSTLIN	; **
-	JNZ	CDUWP0		; **BRIF not unwrapping to LSTPOS
-	TEST	BYTE PTR LSTCOL,LOW 377O	; **
-	JNZ	CDUWP0		; **BRIF have some characters to unwrap
-	MOV	AH,BYTE PTR LINLEN	; **
-	JMP	SHORT CDUWXI	; **If no characters to unwrap, just exit
-CDUWP0:	INC	CH
-	MOV	BX,AX		; Put DESTINATION in BX
+	JB	@SCNDRV@_CDUWXI  ; BRIF no space to unwrap characters to, just exit
+	CMP	DL,byte [@LSTLIN]  ; **
+	JNZ	@SCNDRV@_CDUWP0  ; **BRIF not unwrapping to LSTPOS
+	TEST	byte [@LSTCOL],((255) and 0FFh)  ; **
+	JNZ	@SCNDRV@_CDUWP0  ; **BRIF have some characters to unwrap
+	MOV	AH,byte [@LINLEN]  ; **
+	JMP	@SCNDRV@_CDUWXI  ; **If no characters to unwrap, just exit
+@SCNDRV@_CDUWP0:	INC	CH
+	MOV	BX,AX  ; Put DESTINATION in BX
 	MOV	BL,DL
 	INC	DL
-	CALL	SCNRTL		; Read terminator for next line
+	CALL	@SCNDRV@_SCNRTL  ; Read terminator for next line
 	PUSH	AX
-	PUSHF	
+	PUSHF
 	CMP	CH,AH
-	JBE	CDUWP1		; BRIF enough characters to satisfy demand
-	MOV	CH,AH		; Else get all characters in next line
-CDUWP1:	MOV	CL,LOW 1
-	MOV	DH,BYTE PTR WDOLFT
-	MOV	AX,DX		; Put SOURCE in AX
+	JBE	@SCNDRV@_CDUWP1  ; BRIF enough characters to satisfy demand
+	MOV	CH,AH  ; Else get all characters in next line
+@SCNDRV@_CDUWP1:	MOV	CL,((1) and 0FFh)
+	MOV	DH,byte [@WDOLFT]
+	MOV	AX,DX  ; Put SOURCE in AX
 	OR	CH,CH
-	JNZ	CDUWPN		; BRIF not a null line following
-	POPF	
-	PUSHF	
-	JZ	CDUWP4		; BRIF LF term'd, don't remove null line
-	PUSH	WORD PTR TRMCUR
-	CALL	SCRLU0		; Get rid of null line following
-	POP	WORD PTR TRMCUR
-	JMP	SHORT CDUWP4	; Set up terminator for return
-CDUWPN:
-	CALL	SCROLL		; Scroll chars from old line to new
-	CMP	DL,BYTE PTR LSTLIN
-	JNZ	CDUWP4		; BRIF not on LSTPOS line
+	JNZ	@SCNDRV@_CDUWPN  ; BRIF not a null line following
+	POPF
+	PUSHF
+	JZ	@SCNDRV@_CDUWP4  ; BRIF LF term'd, don't remove null line
+	PUSH	word [@TRMCUR]
+	CALL	@SCNDRV@_SCRLU0  ; Get rid of null line following
+	POP	word [@TRMCUR]
+	JMP	@SCNDRV@_CDUWP4  ; Set up terminator for return
+@SCNDRV@_CDUWPN:
+	CALL	@SCROLL  ; Scroll chars from old line to new
+	CMP	DL,byte [@LSTLIN]
+	JNZ	@SCNDRV@_CDUWP4  ; BRIF not on LSTPOS line
 ;If LSTPOS is between WDOLFT and SOURCE+COUNT, unwrap LSTPOS
 	PUSH	AX
 	ADD	AH,CH
-	SUB	AH,BYTE PTR LSTCOL
+	SUB	AH,byte [@LSTCOL]
 	POP	AX
-	JBE	CDUWP3		; BRIF LSTPOS .GT. SOURCE+COUNT
-	SUB	BYTE PTR LSTCOL,AH	; LSTCOL=DESTINATION+(LSTPOS-SOURCE)
-	JNB	CDUWPL
-	MOV	BYTE PTR LSTCOL,LOW 0	; LSTCOL was zero, don't let it go negative
-CDUWPL:	ADD	BYTE PTR LSTCOL,BH
-	DEC	BYTE PTR LSTLIN	; LSTLIN is line unwrapped to
-COMMENT	%
-; Blank from DESTINATION+COUNT-((SOURCE+COUNT)-LSTPOS) to EOL
-	PUSH    AX
-	PUSH    DX
-	PUSH    CX
-	ADDB    DH,CH
-	SUBB    DH,AH           ; (DH,DL)=start posn for blanking
-	MOVB    CH,LINLEN       ; CH=end column
-	MOVI    AX," "
-CDUWPB: CALL    SCROUT
-	INCB    DH
-	CMPB    DH,CH
-	JBE     CDUWPB          ; Continue blanking to EOL
-	POP     CX
-	POP     DX
-	POP     AX
-%
-CDUWP3:
+	JBE	@SCNDRV@_CDUWP3  ; BRIF LSTPOS .GT. SOURCE+COUNT
+	SUB	byte [@LSTCOL],AH  ; LSTCOL=DESTINATION+(LSTPOS-SOURCE)
+	JNB	@SCNDRV@_CDUWPL
+	MOV	byte [@LSTCOL],((0) and 0FFh)  ; LSTCOL was zero, don't let it go negative
+@SCNDRV@_CDUWPL:	ADD	byte [@LSTCOL],BH
+	DEC	byte [@LSTLIN]  ; LSTLIN is line unwrapped to
+; COMMENT	%
+; ; Blank from DESTINATION+COUNT-((SOURCE+COUNT)-LSTPOS) to EOL
+; 	PUSH    AX
+; 	PUSH    DX
+; 	PUSH    CX
+; 	ADDB    DH,CH
+; 	SUBB    DH,AH           ; (DH,DL)=start posn for blanking
+; 	MOVB    CH,LINLEN       ; CH=end column
+; 	MOVI    AX," "
+; CDUWPB: CALL    SCROUT
+; 	INCB    DH
+; 	CMPB    DH,CH
+; 	JBE     CDUWPB          ; Continue blanking to EOL
+; 	POP     CX
+; 	POP     DX
+; 	POP     AX
+; %
+@SCNDRV@_CDUWP3:
 ;Return terminator for DL-1
-CDUWP4:	ADD	BH,CH		; Get new terminator posn into BH
+@SCNDRV@_CDUWP4:	ADD	BH,CH  ; Get new terminator posn into BH
 	DEC	BH
-	POPF	
-	POP	AX		; Restore original terminators for this line
-	MOV	BL,LOW OFFSET TRMEOL	; Assume line unwrapped is at EOL
-	JB	CDUWPE		; BRIF at EOL
-	MOV	BL,LOW OFFSET TRMLNF	; Assume LF was unwrapped on unwrapped line
-	JZ	CDUWP6		; BRIF at LF
+	POPF
+	POP	AX  ; Restore original terminators for this line
+	MOV	BL,((@TRMEOL) and 0FFh)  ; Assume line unwrapped is at EOL
+	JB	@SCNDRV@_CDUWPE  ; BRIF at EOL
+	MOV	BL,((@TRMLNF) and 0FFh)  ; Assume LF was unwrapped on unwrapped line
+	JZ	@SCNDRV@_CDUWP6  ; BRIF at LF
 ;WRAP or NULL_WRAP, if BH .NE. LINLEN, then it must be LINLEN-1 and NULL_WRAP
-CDUWP5:	MOV	BL,LOW OFFSET TRMWRP	; Assume line is WRAP
-	CMP	BH,BYTE PTR LINLEN
-	JZ	CDUWP7		; Previous line is full, must be WRAP
-	MOV	BL,LOW OFFSET TRMNWP
-	MOV	BH,BYTE PTR LINLEN
-	JMP	SHORT CDUWP7	; Previous line not full even though we had
-				;   enough chars to fill it, must be NULL_WRAP
+@SCNDRV@_CDUWP5:	MOV	BL,((@TRMWRP) and 0FFh)  ; Assume line is WRAP
+	CMP	BH,byte [@LINLEN]
+	JZ	@SCNDRV@_CDUWP7  ; Previous line is full, must be WRAP
+	MOV	BL,((@TRMNWP) and 0FFh)
+	MOV	BH,byte [@LINLEN]
+	JMP	@SCNDRV@_CDUWP7  ; Previous line not full even though we had
+;   enough chars to fill it, must be NULL_WRAP
 ;EOL terminated
-CDUWPE:	OR	AH,AH
-	JZ	CDUWP7		; If unwrapped null line, return EOL
+@SCNDRV@_CDUWPE:	OR	AH,AH
+	JZ	@SCNDRV@_CDUWP7  ; If unwrapped null line, return EOL
 ;Was EOL or LF terminated, see if entire line was unwrapped
-CDUWP6:	CMP	AH,CH
-	JNZ	CDUWP5		; BRIF wasn't unwrapped, previous line is WRAP
+@SCNDRV@_CDUWP6:	CMP	AH,CH
+	JNZ	@SCNDRV@_CDUWP5  ; BRIF wasn't unwrapped, previous line is WRAP
 ;terminator=(BH,BL)
-CDUWP7:	PUSH	BX
+@SCNDRV@_CDUWP7:	PUSH	BX
 ;       ORB     CH,CH
 ;       JZ      CDUWP8          ; BRIF no chars to delete from here on
 ;       MOVBI   CL,^O377        ; Set flag indicating can remove lines deleted
 ;       CALL    CDELLG          ; Delete CH characters at (DH,DL)
-CDUWP8:	POP	AX
-CDUWPX:	POP	WORD PTR TRMCUR
+@SCNDRV@_CDUWP8:	POP	AX
+@SCNDRV@_CDUWPX:	POP	word [@TRMCUR]
 	POP	DX
 	MOV	BH,CH
 	POP	CX
 	MOV	CH,BH
 	POP	BX
-	RET	
+	RET
 ;Needed one char and first char on next line is DBLCHR
-CDUWPF:	POP	AX
-	POPF			; Clean up stack
-	MOV	AH,BYTE PTR LINLEN
-	MOV	AL,LOW OFFSET TRMNWP	; Set terminator to NULL_WRAP
-	JMP	SHORT CDUWP7
-
-
+@SCNDRV@_CDUWPF:	POP	AX
+	POPF  ; Clean up stack
+	MOV	AH,byte [@LINLEN]
+	MOV	AL,((@TRMNWP) and 0FFh)  ; Set terminator to NULL_WRAP
+	JMP	@SCNDRV@_CDUWP7
 
 ;SUBROUTINE CDELPH              ; Delete chars on physical line
 ;                       On entry:   (DH,DL)=posn to start delete from
@@ -1743,342 +1690,339 @@ CDUWPF:	POP	AX
 ;                                   CH=count
 ;                       On exit:    AH=term posn
 ;                                   (DH,DL)=posn
-;
-CDELPH:				;PUSH    SI
-	XOR	SI,SI		; Set SI to zero(flag no char restore necessary)
+
+@SCNDRV@_CDELPH:  ;PUSH    SI
+	XOR	SI,SI  ; Set SI to zero(flag no char restore necessary)
 	PUSH	BX
 	PUSH	CX
 	PUSH	DX
 	PUSH	AX
 	CMP	DH,AH
-	JA	CDEL9I		; BRIF delete beyond or at physical end
-	MOV	BX,DX		; (BH,BL)=DESTINATION
+	JA	@SCNDRV@_CDEL9I  ; BRIF delete beyond or at physical end
+	MOV	BX,DX  ; (BH,BL)=DESTINATION
 	MOV	AX,DX
-	ADD	AH,CH		; (AH,AL)=SOURCE
-	POP	CX		; CH=end of physical line
+	ADD	AH,CH  ; (AH,AL)=SOURCE
+	POP	CX  ; CH=end of physical line
 	PUSH	CX
 	CMP	AH,CH
-	JBE	CDELP0		; BRIF not deleting more than we have
+	JBE	@SCNDRV@_CDELP0  ; BRIF not deleting more than we have
 	MOV	AH,CH
-	INC	AH		; Delete entire line
-CDELP0:	CMP	DL,BYTE PTR LSTLIN
-	JNZ	CDELP1		; BRIF not on line with LSTPOS
-	CMP	CH,BYTE PTR LSTCOL
-	JBE	CDELP1		; BRIF physical end less than LSTPOS
-	MOV	CH,BYTE PTR LSTCOL	; Use LSTPOS as end of this line
+	INC	AH  ; Delete entire line
+@SCNDRV@_CDELP0:	CMP	DL,byte [@LSTLIN]
+	JNZ	@SCNDRV@_CDELP1  ; BRIF not on line with LSTPOS
+	CMP	CH,byte [@LSTCOL]
+	JBE	@SCNDRV@_CDELP1  ; BRIF physical end less than LSTPOS
+	MOV	CH,byte [@LSTCOL]  ; Use LSTPOS as end of this line
 	CMP	DH,CH
-	JA	CDEL9I		; BRIF delete beyond terminator
-CDELP1:
-	PUSH	CX		; Save last posn of SOURCE
+	JA	@SCNDRV@_CDEL9I  ; BRIF delete beyond terminator
+@SCNDRV@_CDELP1:
+	PUSH	CX  ; Save last posn of SOURCE
 	SUB	CH,AH
-	PUSHF	
+	PUSHF
 	MOV	DH,BH
-	ADD	DH,CH		; (DH,DL)=end of DESTINATION
-	POPF	
-	JB	CDELP4		; BRIF SOURCE greater than logical end of physical
-	MOV	CL,LOW 1
+	ADD	DH,CH  ; (DH,DL)=end of DESTINATION
+	POPF
+	JB	@SCNDRV@_CDELP4  ; BRIF SOURCE greater than logical end of physical
+	MOV	CL,((1) and 0FFh)
 	INC	CH
-	CALL	SCROLL		; Move characters to left
+	CALL	@SCROLL  ; Move characters to left
 ;Blank from end of SOURCE to end of DESTINATION+1
-CDELP4:	POP	CX		; CH=end column of SOURCE
-	INC	DH		; DH=end column of DESTINATION plus one
+@SCNDRV@_CDELP4:	POP	CX  ; CH=end column of SOURCE
+	INC	DH  ; DH=end column of DESTINATION plus one
 	PUSH	DX
 	MOV	AX," "
-CDELP5:	CMP	DH,CH
-	JA	CDELP6
-	CALL	SCROUT		; Blank this posn
+@SCNDRV@_CDELP5:	CMP	DH,CH
+	JA	@SCNDRV@_CDELP6
+	CALL	@SCROUT  ; Blank this posn
 	INC	DH
-	JMP	SHORT CDELP5
-CDEL9I:	JMP	SHORT CDELP9	; Indirect to CDELP9
-CDELP6:	POP	DX		; Restore end column of DESTINATION plus one
-	POP	AX		; Restore terminator passed to routine
+	JMP	@SCNDRV@_CDELP5
+@SCNDRV@_CDEL9I:	JMP	@SCNDRV@_CDELP9  ; Indirect to CDELP9
+@SCNDRV@_CDELP6:	POP	DX  ; Restore end column of DESTINATION plus one
+	POP	AX  ; Restore terminator passed to routine
 ;CH=last valid column, DH=first blanking column, AH=term column, AL=term type
-	CMP	DL,BYTE PTR LSTLIN
-	JNZ	CDELP7		; BRIF was not delete before LSTPOS
-	CMP	CH,BYTE PTR LSTCOL
-	JB	CDELP7		; BRIF delete up to terminator
+	CMP	DL,byte [@LSTLIN]
+	JNZ	@SCNDRV@_CDELP7  ; BRIF was not delete before LSTPOS
+	CMP	CH,byte [@LSTCOL]
+	JB	@SCNDRV@_CDELP7  ; BRIF delete up to terminator
 ;Delete included LSTPOS, subtract total deleted from LSTCOL
 	POP	DX
 	POP	CX
-	SUB	BYTE PTR LSTCOL,CH
-	JAE	CDEL8A		; **BRIF LSTCOL valid
-	MOV	BYTE PTR LSTCOL,LOW 0	; **Set LSTCOL to 0
-	JMP	SHORT CDEL8A	; Delete up to LSTPOS, adjust LSTPOS
+	SUB	byte [@LSTCOL],CH
+	JAE	@SCNDRV@_CDEL8A  ; **BRIF LSTCOL valid
+	MOV	byte [@LSTCOL],((0) and 0FFh)  ; **Set LSTCOL to 0
+	JMP	@SCNDRV@_CDEL8A  ; Delete up to LSTPOS, adjust LSTPOS
 ;Deleted all data up to terminator, adjust terminator
-CDELP7:	MOV	AH,DH
-	DEC	AH		; Set terminator to last column of DESTINATION
-CDELP8:	POP	DX		; (DH,DL)=original posn(start of DESTINATION)
-	POP	CX		; CL=flag
-CDEL8A:	CMP	DH,AH
-	JBE	CDELPX		; BRIF still data remaining to right
-	CMP	DH,LOW 1
-	JNZ	CDELPX		; BRIF still data remaining to left
-	CMP	AL,LOW OFFSET TRMEOL
-	JZ	CDELPX		; BRIF don't remove null line
+@SCNDRV@_CDELP7:	MOV	AH,DH
+	DEC	AH  ; Set terminator to last column of DESTINATION
+@SCNDRV@_CDELP8:	POP	DX  ; (DH,DL)=original posn(start of DESTINATION)
+	POP	CX  ; CL=flag
+@SCNDRV@_CDEL8A:	CMP	DH,AH
+	JBE	@SCNDRV@_CDELPX  ; BRIF still data remaining to right
+	CMP	DH,((1) and 0FFh)
+	JNZ	@SCNDRV@_CDELPX  ; BRIF still data remaining to left
+	CMP	AL,((@TRMEOL) and 0FFh)
+	JZ	@SCNDRV@_CDELPX  ; BRIF don't remove null line
 ;We have null line, remove it from the screen
-	PUSH	WORD PTR TRMCUR
-	CMP	DL,BYTE PTR LSTLIN	; **If LSTPOS is wiped out, put it at
-				; ** end of previous line
-	JNZ	CDEL8B		; **BRIF not wiped out
-	DEC	BYTE PTR LSTLIN	; **
-	MOV	BH,BYTE PTR WDOLFT	; **
-	MOV	BYTE PTR LSTCOL,BH	; **
-CDEL8B:				; **
-	CALL	SCRLU0		; Scroll up from bottom of screen to DL
-	POP	WORD PTR TRMCUR
-	JMP	SHORT CDELPX	; All done
+	PUSH	word [@TRMCUR]
+	CMP	DL,byte [@LSTLIN]  ; **If LSTPOS is wiped out, put it at
+; ** end of previous line
+	JNZ	@SCNDRV@_CDEL8B  ; **BRIF not wiped out
+	DEC	byte [@LSTLIN]  ; **
+	MOV	BH,byte [@WDOLFT]  ; **
+	MOV	byte [@LSTCOL],BH  ; **
+@SCNDRV@_CDEL8B:  ; **
+	CALL	@SCNDRV@_SCRLU0  ; Scroll up from bottom of screen to DL
+	POP	word [@TRMCUR]
+	JMP	@SCNDRV@_CDELPX  ; All done
 ;We are deleting to right of line terminator
-CDELP9:	POP	AX		; Restore terminator passed
-	CMP	AL,LOW OFFSET TRMLNF
-	MOV	DH,AH		; DH=end of valid data plus one
-	JZ	CDELP7		; BRIF LF term'd, delete it
-	POP	DX		; Delete beyond valid data, ignore it
+@SCNDRV@_CDELP9:	POP	AX  ; Restore terminator passed
+	CMP	AL,((@TRMLNF) and 0FFh)
+	MOV	DH,AH  ; DH=end of valid data plus one
+	JZ	@SCNDRV@_CDELP7  ; BRIF LF term'd, delete it
+	POP	DX  ; Delete beyond valid data, ignore it
 	POP	CX
-CDELPX:	POP	BX
-	CMP	DL,BYTE PTR LSTLIN
-	JZ	CDELPF		; BRIF not on LSTPOS line, no update
-	CMP	AH,BYTE PTR LSTCOL
-	JAE	CDELPF		; BRIF LSTPOS is within line, no update
-				;POP     SI
-CDELPF:	RET	
-	SUBTTL  CONTROL CHARACTER ROUTINES - Line append, carriage return and linefeed
-
-
+@SCNDRV@_CDELPX:	POP	BX
+	CMP	DL,byte [@LSTLIN]
+	JZ	@SCNDRV@_CDELPF  ; BRIF not on LSTPOS line, no update
+	CMP	AH,byte [@LSTCOL]
+	JAE	@SCNDRV@_CDELPF  ; BRIF LSTPOS is within line, no update
+;POP     SI
+@SCNDRV@_CDELPF:	RET
+; SUBTTL  CONTROL CHARACTER ROUTINES - Line append, carriage return and linefeed
 
 ;Append to end of logical line
-;
-LAPPND:
-LAPPN0:	CALL	SCNRDT
-	JB	LAPPN1		; BRIF we are at last line in logical
+
+@SCNDRV@_LAPPND:
+@SCNDRV@_LAPPN0:	CALL	@SCNRDT
+	JB	@SCNDRV@_LAPPN1  ; BRIF we are at last line in logical
 	INC	DL
-	JMP	SHORT LAPPN0	; See if next line is last line in logical
-LAPPN1:	MOV	DH,AH		; Set current posn to EOL
-	CMP	AH,BYTE PTR LINLEN
-	JNB	LAPPN2		; If end of window, advance cursor posn here
-	JMP	WCSADV		; Use logical cursor advance(advances LSTPOS)
+	JMP	@SCNDRV@_LAPPN0  ; See if next line is last line in logical
+@SCNDRV@_LAPPN1:	MOV	DH,AH  ; Set current posn to EOL
+	CMP	AH,byte [@LINLEN]
+	JNB	@SCNDRV@_LAPPN2  ; If end of window, advance cursor posn here
+	JMP	@SCNDRV@_WCSADV  ; Use logical cursor advance(advances LSTPOS)
 ;This will set the cursor posn one beyond end(wrap next char typed)
-LAPPN2:	INC	DH
-	RET	
+@SCNDRV@_LAPPN2:	INC	DH
+	RET
 
 ;Carriage return
-;
-LCARET:
-	CALL	SCNRDT
-	JB	LCRET1		; BRIF this line already EOL terminated
-	JZ	LCRET0		; BRIF LF terminated
-	CMP	AL,LOW OFFSET TRMNWP
-	JNZ	LCRET1		; BRIF not NULL_WRAP terminated
-LCRET0:	DEC	AH		; Do not include LF or NULL_WRAP in line
-LCRET1:	MOV	AL,LOW OFFSET TRMEOL
-	CALL	SCNWTT		; Make this line EOL terminated
-	MOV	DH,BYTE PTR WDOLFT	; And move posn to left margin
-	RET	
+
+@SCNDRV@_LCARET:
+	CALL	@SCNRDT
+	JB	@SCNDRV@_LCRET1  ; BRIF this line already EOL terminated
+	JZ	@SCNDRV@_LCRET0  ; BRIF LF terminated
+	CMP	AL,((@TRMNWP) and 0FFh)
+	JNZ	@SCNDRV@_LCRET1  ; BRIF not NULL_WRAP terminated
+@SCNDRV@_LCRET0:	DEC	AH  ; Do not include LF or NULL_WRAP in line
+@SCNDRV@_LCRET1:	MOV	AL,((@TRMEOL) and 0FFh)
+	CALL	@SCNDRV@_SCNWTT  ; Make this line EOL terminated
+	MOV	DH,byte [@WDOLFT]  ; And move posn to left margin
+	RET
 
 ;Line feed
-;
-LFEED:	MOV	SI,0
-	TEST	BYTE PTR F_CRET,LOW 377O
-	JZ	LFD90I		; BRIF LF following CR
-	TEST	BYTE PTR F_INST,LOW 377O
-	JZ	LFED30		; BRIF not insert mode
-	CALL	SCNRTL
+
+@SCNDRV@_LFEED:	MOV	SI,0
+	TEST	byte [@F_CRET],((255) and 0FFh)
+	JZ	@SCNDRV@_LFD90I  ; BRIF LF following CR
+	TEST	byte [@F_INST],((255) and 0FFh)
+	JZ	@SCNDRV@_LFED30  ; BRIF not insert mode
+	CALL	@SCNDRV@_SCNRTL
 	CMP	AH,DH
-	JB	LFED30		; Inserting beyond end of physical(just append)
+	JB	@SCNDRV@_LFED30  ; Inserting beyond end of physical(just append)
 ;Insert mode, move characters from cursor to EOL onto the next line
-	CMP	DL,BYTE PTR LSTLIN
-	JZ	CBEPI2		; BRIF on LSTPOS line, can't do insert LF
+	CMP	DL,byte [@LSTLIN]
+	JZ	@SCNDRV@_CBEPI2  ; BRIF on LSTPOS line, can't do insert LF
 ; IMPROVEMENT: Find last physical in this logical and see if it can be moved
 ;   down one line. If not, abort before any inserts
-LFED10:
-	CLC			; Indicate call is from Screen Editor
-	CALL	SCRINP
-	MOV	SI,AX		; Save first char in SI
+@SCNDRV@_LFED10:
+	CLC  ; Indicate call is from Screen Editor
+	CALL	@SCRINP
+	MOV	SI,AX  ; Save first char in SI
 	MOV	AX," "
-	CALL	SCROUT
+	CALL	@SCROUT
 	PUSH	DX
-LFED12:	MOV	CH,LOW 1
-	CALL	MKRMCH		; Move everything over one
+@SCNDRV@_LFED12:	MOV	CH,((1) and 0FFh)
+	CALL	@SCNDRV@_MKRMCH  ; Move everything over one
 	INC	DH
-	CMP	DH,BYTE PTR LINLEN
-	JBE	LFED12		; Keep going until the end of the line
+	CMP	DH,byte [@LINLEN]
+	JBE	@SCNDRV@_LFED12  ; Keep going until the end of the line
 	MOV	AH,DL
-	POP	DX		; Restore posn
+	POP	DX  ; Restore posn
 	MOV	DL,AH
-	CALL	PLINIT		; Terminate line at current posn
-	CMP	DL,BYTE PTR WDOBOT
-	JNZ	LFED43		; Change terminator to LF and goto next line
-	JMP	LFEEDX
+	CALL	@SCNDRV@_PLINIT  ; Terminate line at current posn
+	CMP	DL,byte [@WDOBOT]
+	JNZ	@SCNDRV@_LFED43  ; Change terminator to LF and goto next line
+	JMP	@SCNDRV@_LFEEDX
 ;No room!!
-CBEEPI:	POPF			; Clean stack
-CBEPI2:	JMP	CBEEP
-LFD90I:	JMP	SHORT LFED90	; Indirect jump to LFED90
+@SCNDRV@_CBEEPI:	POPF  ; Clean stack
+@SCNDRV@_CBEPI2:	JMP	@SCNDRV@_CBEEP
+@SCNDRV@_LFD90I:	JMP	@SCNDRV@_LFED90  ; Indirect jump to LFED90
 ;Insert beyond end of physical=append
 ; Append LF to end of physical line
-LFED30:	CALL	SCNRTL
-	PUSHF	
-	JB	LFED31		; BRIF need one more space to output LF
-	JZ	LFED32		; BRIF already LF terminated, don't need space
-LFED31:	INC	AH		; Need one more space at terminator posn
-LFED32:	CMP	AH,BYTE PTR LINLEN
-	JBE	LFED40		; BRIF have room on this line
-	CALL	LFWRAP		; Wrap linefeed to next line
-	JB	LFED69		; BRIF no room
+@SCNDRV@_LFED30:	CALL	@SCNDRV@_SCNRTL
+	PUSHF
+	JB	@SCNDRV@_LFED31  ; BRIF need one more space to output LF
+	JZ	@SCNDRV@_LFED32  ; BRIF already LF terminated, don't need space
+@SCNDRV@_LFED31:	INC	AH  ; Need one more space at terminator posn
+@SCNDRV@_LFED32:	CMP	AH,byte [@LINLEN]
+	JBE	@SCNDRV@_LFED40  ; BRIF have room on this line
+	CALL	@SCNDRV@_LFWRAP  ; Wrap linefeed to next line
+	JB	@SCNDRV@_LFED69  ; BRIF no room
 ;The possibilities at this point are WRAP or EOL terminated
-	POPF	
-	JNB	LFED34		; BRIF not EOL term'd(no change to terminator)
-	CALL	SCNRDT
-	MOV	AH,BYTE PTR LINLEN	; EOL terminated, change to WRAP at LINLEN
-	MOV	AL,LOW OFFSET TRMWRP
-	CALL	SCNWTT
-LFED34:	MOV	DH,BYTE PTR WDOLFT
-	CMP	DL,BYTE PTR LSTLIN
-	JNZ	LFED35		; BRIF not extending LSTPOS
-	INC	BYTE PTR LSTLIN	; Move LSTPOS with LF
-	MOV	BYTE PTR LSTCOL,DH
-LFED35:	INC	DL		; Move to new line(created by MKRMNL above)
+	POPF
+	JNB	@SCNDRV@_LFED34  ; BRIF not EOL term'd(no change to terminator)
+	CALL	@SCNRDT
+	MOV	AH,byte [@LINLEN]  ; EOL terminated, change to WRAP at LINLEN
+	MOV	AL,((@TRMWRP) and 0FFh)
+	CALL	@SCNDRV@_SCNWTT
+@SCNDRV@_LFED34:	MOV	DH,byte [@WDOLFT]
+	CMP	DL,byte [@LSTLIN]
+	JNZ	@SCNDRV@_LFED35  ; BRIF not extending LSTPOS
+	INC	byte [@LSTLIN]  ; Move LSTPOS with LF
+	MOV	byte [@LSTCOL],DH
+@SCNDRV@_LFED35:	INC	DL  ; Move to new line(created by MKRMNL above)
 	MOV	AH,DH
-	JMP	SHORT LFED43
-LFED40:	POPF	
-	JNB	LFED42		; BRIF not EOL, just change terminator to LF
-LFED41:	CALL	MKRMNL		; Open up next line
-	JB	LFEEDX		; No room for LF
+	JMP	@SCNDRV@_LFED43
+@SCNDRV@_LFED40:	POPF
+	JNB	@SCNDRV@_LFED42  ; BRIF not EOL, just change terminator to LF
+@SCNDRV@_LFED41:	CALL	@SCNDRV@_MKRMNL  ; Open up next line
+	JB	@SCNDRV@_LFEEDX  ; No room for LF
 ;SUCCESS: terminate current line with LF
-LFED42:	MOV	DH,AH
+@SCNDRV@_LFED42:	MOV	DH,AH
 	MOV	AX," "
-	CALL	SCROUT		; Put a blank at terminator posn
-LFED43:	CALL	SCNRDT		; Reread terminator in case of MKRMNL scroll up
+	CALL	@SCROUT  ; Put a blank at terminator posn
+@SCNDRV@_LFED43:	CALL	@SCNRDT  ; Reread terminator in case of MKRMNL scroll up
 	MOV	AH,DH
-	MOV	AL,LOW OFFSET TRMLNF
-	CALL	SCNWTT		; And terminate line with LF
-	CMP	DL,BYTE PTR LSTLIN
-	JNZ	LFED95		; BRIF no LSTPOS update
-	MOV	BYTE PTR LSTCOL,LOW 0	; LSTPOS moves to line beyond linefeed
-	INC	BYTE PTR LSTLIN
-	JMP	SHORT LFED95
-LFED90:	PUSH	SI
-	CALL	MKRMNL		; Open up next line
+	MOV	AL,((@TRMLNF) and 0FFh)
+	CALL	@SCNDRV@_SCNWTT  ; And terminate line with LF
+	CMP	DL,byte [@LSTLIN]
+	JNZ	@SCNDRV@_LFED95  ; BRIF no LSTPOS update
+	MOV	byte [@LSTCOL],((0) and 0FFh)  ; LSTPOS moves to line beyond linefeed
+	INC	byte [@LSTLIN]
+	JMP	@SCNDRV@_LFED95
+@SCNDRV@_LFED90:	PUSH	SI
+	CALL	@SCNDRV@_MKRMNL  ; Open up next line
 	POP	SI
-	JB	LFEEDX		; No room
-LFED95:	CALL	CSRDWN		; Move to next line
-	MOV	DH,BYTE PTR WDOLFT
+	JB	@SCNDRV@_LFEEDX  ; No room
+@SCNDRV@_LFED95:	CALL	@SCNDRV@_CSRDWN  ; Move to next line
+	MOV	DH,byte [@WDOLFT]
 	OR	SI,SI
-	JZ	LFEEDX
+	JZ	@SCNDRV@_LFEEDX
 	MOV	AX,SI
-	CALL	SCROUT		; Restore first char of insert linefeed
-LFEEDX:	CMP	DL,BYTE PTR WDOBOT
-	JBE	LFEEDZ
-	MOV	DL,BYTE PTR WDOBOT
-LFEEDZ:	RET	
+	CALL	@SCROUT  ; Restore first char of insert linefeed
+@SCNDRV@_LFEEDX:	CMP	DL,byte [@WDOBOT]
+	JBE	@SCNDRV@_LFEEDZ
+	MOV	DL,byte [@WDOBOT]
+@SCNDRV@_LFEEDZ:	RET
 ;No room for linefeed, terminate this line and exit
-LFED69:	POP	AX
-	JMP	SHORT LFEEDX
-	SUBTTL  CONTROL CHARACTER ROUTINES - Insert and MKRMCH
+@SCNDRV@_LFED69:	POP	AX
+	JMP	@SCNDRV@_LFEEDX
+; SUBTTL  CONTROL CHARACTER ROUTINES - Insert and MKRMCH
 
-
-LINSRT:	XOR	BYTE PTR F_INST,LOW 377O	;Toggle insert flag
-	RET	
+@SCNDRV@_LINSRT:	XOR	byte [@F_INST],((255) and 0FFh)  ;Toggle insert flag
+	RET
 
 ;SUBROUTINE MKRMCH              ; This routine opens up space in logical lines
 ;**                     On entry:   (DH,DL)=posn to open space
 ;**                                 CH=number of spaces to open(1 or 2)
 ;**                     On exit:    (DH,DL)=same posn(DL value can change)
 ;**
-DSEG	SEGMENT PUBLIC 'DATASG'
-	EXTRN	BUF:WORD
-DSEG	ENDS
-MKRMCH:	PUSH	SI
+end if
+; EXTRN	BUF:WORD
+if @GW_PASS = 1
+@SCNDRV@_MKRMCH:	PUSH	SI
 	PUSH	AX
 	PUSH	CX
 	PUSH	DX
-	MOV	SI,OFFSET BUF
-	MOV	DI,OFFSET BUF+128D	; SI and DI are overflow character buffers
-	CALL	SCNRDT
-	PUSHF	
+	MOV	SI,@BUF
+	MOV	DI,@BUF+128  ; SI and DI are overflow character buffers
+	CALL	@SCNRDT
+	PUSHF
 	PUSH	AX
-	CALL	MVCHLN		; Move characters over put overflow at [DI]
-	XOR	CL,CL		; CL=Iteration depth(and count of physical lines)
-MKRMC0:	OR	CH,CH
-	JNZ	MKRMC1		; BRIF line overflowed
+	CALL	@SCNDRV@_MVCHLN  ; Move characters over put overflow at [DI]
+	XOR	CL,CL  ; CL=Iteration depth(and count of physical lines)
+@SCNDRV@_MKRMC0:	OR	CH,CH
+	JNZ	@SCNDRV@_MKRMC1  ; BRIF line overflowed
 	POP	AX
-	POPF	
-MKRMCX:	ADD	CL,DL		; CL=original line number
-	POP	DX		; DH=orginal column
-	MOV	DL,CL		; DL=original line number
-MKRMX2:	POP	CX
+	POPF
+@SCNDRV@_MKRMCX:	ADD	CL,DL  ; CL=original line number
+	POP	DX  ; DH=orginal column
+	MOV	DL,CL  ; DL=original line number
+@SCNDRV@_MKRMX2:	POP	CX
 	POP	AX
 	POP	SI
-	RET	
+	RET
 ;Line overflow we must wrap char to next line
-MKRMC1:	POP	AX
-	POPF			; Get back old terminator
-	JB	MKRMC3		; BRIF was EOL term'd
-	JNZ	MKRMC4		; BRIF was WRAP or NULL_WRAP term'd
+@SCNDRV@_MKRMC1:	POP	AX
+	POPF  ; Get back old terminator
+	JB	@SCNDRV@_MKRMC3  ; BRIF was EOL term'd
+	JNZ	@SCNDRV@_MKRMC4  ; BRIF was WRAP or NULL_WRAP term'd
 ;Linefeed, make room for linefeed on next line
 	PUSH	AX
-	CALL	LFWRAP
+	CALL	@SCNDRV@_LFWRAP
 	POP	AX
-	JB	MKRMCQ		;  No room, throw away overflow
+	JB	@SCNDRV@_MKRMCQ  ;  No room, throw away overflow
 	DEC	CH
-	JZ	MKRMCX		; Only wrapped the linefeed, done
-	JMP	SHORT MKRMC4	; Pass overflow to next line
+	JZ	@SCNDRV@_MKRMCX  ; Only wrapped the linefeed, done
+	JMP	@SCNDRV@_MKRMC4  ; Pass overflow to next line
 ;EOL terminatedd
-MKRMC3:	PUSH	AX
-	CALL	MKRMNL		; Open up next line for overflow
+@SCNDRV@_MKRMC3:	PUSH	AX
+	CALL	@SCNDRV@_MKRMNL  ; Open up next line for overflow
 	POP	AX
-	JNB	MKRMC4		; BRIF room, wrap overflow
+	JNB	@SCNDRV@_MKRMC4  ; BRIF room, wrap overflow
 ;No room for wrap, terminate this line with EOL and exit
-MKRMCQ:	CALL	SCNRDT
-	MOV	AL,LOW OFFSET TRMEOL
-	CALL	SCNWTT		; No room for overflow, just terminate line
-	JMP	SHORT MKRMCX
+@SCNDRV@_MKRMCQ:	CALL	@SCNRDT
+	MOV	AL,((@TRMEOL) and 0FFh)
+	CALL	@SCNDRV@_SCNWTT  ; No room for overflow, just terminate line
+	JMP	@SCNDRV@_MKRMCX
 ;Insert overflow on next line
-MKRMC4:	CMP	DL,BYTE PTR LSTLIN
-	JNZ	MKRMC6		; BRIF not on LSTPOS line
+@SCNDRV@_MKRMC4:	CMP	DL,byte [@LSTLIN]
+	JNZ	@SCNDRV@_MKRMC6  ; BRIF not on LSTPOS line
 ;AH=Old terminator posn, CH=Overflow count
 	SUB	AH,CH
-	CMP	AL,LOW OFFSET TRMNWP
-	JNZ	MKRMC5		; BRIF wasn't NULL_WRAP, don't adjust posn
+	CMP	AL,((@TRMNWP) and 0FFh)
+	JNZ	@SCNDRV@_MKRMC5  ; BRIF wasn't NULL_WRAP, don't adjust posn
 	DEC	AH
 ;AH=First position wrapped - 1
-MKRMC5:	CMP	AH,BYTE PTR LSTCOL
-	JAE	MKRMC6		; BRIF did not wrap LSTCOL
+@SCNDRV@_MKRMC5:	CMP	AH,byte [@LSTCOL]
+	JAE	@SCNDRV@_MKRMC6  ; BRIF did not wrap LSTCOL
 ;Wrapped LSTPOS
-	MOV	BYTE PTR LSTCOL,LOW 0	; Set LSTPOS to start of next line
-	INC	BYTE PTR LSTLIN
-MKRMC6:	INC	DL		; (DH,DL)=start of next line
-	MOV	DH,BYTE PTR WDOLFT
-	DEC	CL		; Decrement interation counter
-	XCHG	SI,DI		; Use other overflow buffer for this line
-	CALL	SCNRDT
-	PUSHF	
+	MOV	byte [@LSTCOL],((0) and 0FFh)  ; Set LSTPOS to start of next line
+	INC	byte [@LSTLIN]
+@SCNDRV@_MKRMC6:	INC	DL  ; (DH,DL)=start of next line
+	MOV	DH,byte [@WDOLFT]
+	DEC	CL  ; Decrement interation counter
+	XCHG	SI,DI  ; Use other overflow buffer for this line
+	CALL	@SCNRDT
+	PUSHF
 	PUSH	AX
-	PUSH	CX		; Save char count
-	CALL	MVCHLN		; Make room on this line for previous overflow
-	MOV	BX,CX		; Save count of overflow
-	POP	CX		; Get back overflow count in CH
-	PUSH	SI		; Save pointer to characters for insertion
+	PUSH	CX  ; Save char count
+	CALL	@SCNDRV@_MVCHLN  ; Make room on this line for previous overflow
+	MOV	BX,CX  ; Save count of overflow
+	POP	CX  ; Get back overflow count in CH
+	PUSH	SI  ; Save pointer to characters for insertion
 ;Loop to output characters which overflowed onto this line from previous line
-MKRMC7:	CLD			; Scan forwards
-	LODSW			; Get a character
-	CALL	SCROUT		; Output it
+@SCNDRV@_MKRMC7:	CLD  ; Scan forwards
+	LODSW  ; Get a character
+	CALL	@SCROUT  ; Output it
 	INC	DH
-	SUB	CH,LOW 1
-	JA	MKRMC7		; Output the next char
+	SUB	CH,((1) and 0FFh)
+	JA	@SCNDRV@_MKRMC7  ; Output the next char
 	POP	SI
-	MOV	CH,BH		; Restore overflow count for this line
-	JMP	SHORT MKRMC0	; Wrap new overflow
+	MOV	CH,BH  ; Restore overflow count for this line
+	JMP	@SCNDRV@_MKRMC0  ; Wrap new overflow
 
 ;Wrap a linefeed to next line
-LFWRAP:	INC	DL
-	CALL	MKRMNL
-	JB	LFWPEX		;  room, throw away overflow
+@SCNDRV@_LFWRAP:	INC	DL
+	CALL	@SCNDRV@_MKRMNL
+	JB	@SCNDRV@_LFWPEX  ;  room, throw away overflow
 	PUSH	DX
-	CALL	SCRDLN		; Scroll this line down to next
+	CALL	@SCNDRV@_SCRDLN  ; Scroll this line down to next
 	POP	DX
-	CALL	LFTERM		; Make this line LF term'd
-	CLC	
-LFWPEX:	DEC	DL		; Restore original line number
-	RET	
+	CALL	@SCNDRV@_LFTERM  ; Make this line LF term'd
+	CLC
+@SCNDRV@_LFWPEX:	DEC	DL  ; Restore original line number
+	RET
 
 ;SUBROUTINE MVCHLN              ; Open up space in physical line
 ;**                     On entry:   (DH,DL)=posn to open space at
@@ -2087,277 +2031,273 @@ LFWPEX:	DEC	DL		; Restore original line number
 ;**                                 CH=No. of bytes overflowed
 ;**                                 BX destroyed
 ;**
-MVC30I:	JMP	MVCH30
+@SCNDRV@_MVC30I:	JMP	@SCNDRV@_MVCH30
 ;MVC80I: JMP     MVCH80
-MVCHLN:	PUSH	DI
+@SCNDRV@_MVCHLN:	PUSH	DI
 	PUSH	CX
-	CMP	DL,BYTE PTR LSTLIN
-	MOV	CL,BYTE PTR LINLEN
-	JNZ	MVCH00		; BRIF within logical EOL(unless beyond TERM_POS)
-	MOV	CL,BYTE PTR LSTCOL
-MVCH00:	CALL	SCNRTL		; AX=current physical terminator
+	CMP	DL,byte [@LSTLIN]
+	MOV	CL,byte [@LINLEN]
+	JNZ	@SCNDRV@_MVCH00  ; BRIF within logical EOL(unless beyond TERM_POS)
+	MOV	CL,byte [@LSTCOL]
+@SCNDRV@_MVCH00:	CALL	@SCNDRV@_SCNRTL  ; AX=current physical terminator
 	CMP	AH,DH
-	JB	MVC30I		; BRIF inserting beyond end of physical
-	CMP	DL,BYTE PTR LSTLIN
-	JNZ	MVCH03
+	JB	@SCNDRV@_MVC30I  ; BRIF inserting beyond end of physical
+	CMP	DL,byte [@LSTLIN]
+	JNZ	@SCNDRV@_MVCH03
 	CMP	CL,AH
-	JNB	MVCH03		; BRIF LSTPOS .GTE. TERM_POSN
-	MOV	AH,CL		; Else use LSTPOS as TERM_POSN
+	JNB	@SCNDRV@_MVCH03  ; BRIF LSTPOS .GTE. TERM_POSN
+	MOV	AH,CL  ; Else use LSTPOS as TERM_POSN
 ;We are inserting before end of physical line and LSTPOS .GTE. TERM_POSN
-MVCH03:	PUSH	DX
+@SCNDRV@_MVCH03:	PUSH	DX
 	PUSH	AX
-	ADD	CH,AH		; CH=last column for space needed
-	SUB	CH,BYTE PTR LINLEN
-	JA	MVCH10		; BRIF overflow
-	XOR	BH,BH		; Indicate no overflow
-	JMP	SHORT MVCH20
+	ADD	CH,AH  ; CH=last column for space needed
+	SUB	CH,byte [@LINLEN]
+	JA	@SCNDRV@_MVCH10  ; BRIF overflow
+	XOR	BH,BH  ; Indicate no overflow
+	JMP	@SCNDRV@_MVCH20
 ;We have overflow bytes to save
-MVCH10:	MOV	DH,AH
+@SCNDRV@_MVCH10:	MOV	DH,AH
 	SUB	DH,CH
-	INC	DH		; DH=column of first overflow to save
-	CLC			; Indicate call is from Screen Editor
-	CALL	SCRINP		; Read an overflow char
-	MOV	BX,CX		; Save overflow count in BH
+	INC	DH  ; DH=column of first overflow to save
+	CLC  ; Indicate call is from Screen Editor
+	CALL	@SCRINP  ; Read an overflow char
+	MOV	BX,CX  ; Save overflow count in BH
 ;Loop to move overflow character to save buffer
-MVCH14:	CLD	
-	STOSW			; Save overflow char
+@SCNDRV@_MVCH14:	CLD
+	STOSW  ; Save overflow char
 	DEC	CH
-	JZ	MVCH20		; All done with overflow save
+	JZ	@SCNDRV@_MVCH20  ; All done with overflow save
 	INC	DH
-	CLC			; Indicate call is from Screen Editor
-	CALL	SCRINP		; Read an overflow char
-	JMP	SHORT MVCH14	; And save it
+	CLC  ; Indicate call is from Screen Editor
+	CALL	@SCRINP  ; Read an overflow char
+	JMP	@SCNDRV@_MVCH14  ; And save it
 ;Move characters in line over
-MVCH20:	MOV	CX,BX		; Restore # bytes overflowed to CH
-	POP	AX		; AH=term posn
-	SUB	AH,CH		; Adjust term posn so move doesn't overflow
-	POP	DX		; DH=start column of insert
-	POP	BX		; BH=number of bytes to move over
+@SCNDRV@_MVCH20:	MOV	CX,BX  ; Restore # bytes overflowed to CH
+	POP	AX  ; AH=term posn
+	SUB	AH,CH  ; Adjust term posn so move doesn't overflow
+	POP	DX  ; DH=start column of insert
+	POP	BX  ; BH=number of bytes to move over
 	MOV	CL,BL
-	PUSH	CX		; Save overflow count and CL for restore on exit
-	MOV	CH,AH		; CH=last column to move
+	PUSH	CX  ; Save overflow count and CL for restore on exit
+	MOV	CH,AH  ; CH=last column to move
 	SUB	CH,DH
-	INC	CH		; CH=count of chars from CURPOS to TERMPOS
-	PUSHF	
-	MOV	CL,LOW 1	; Move on one line
-	MOV	AX,DX		; FROM=CURPOS
+	INC	CH  ; CH=count of chars from CURPOS to TERMPOS
+	PUSHF
+	MOV	CL,((1) and 0FFh)  ; Move on one line
+	MOV	AX,DX  ; FROM=CURPOS
 	MOV	BL,DL
-	ADD	BH,DH		; TO=CURPOS+COUNT
-	POPF	
-	JNZ	MVCH21		; BRIF count not zero, do move
-	MOV	BH,DH		; All characters to move overflowed
-	JMP	SHORT MVCH22	; Just update terminator to current posn
-MVCH21:	CALL	SCROL2		; Move over characters
-	ADD	BH,CH		; New TERMPOS=TO+number of characters moved
+	ADD	BH,DH  ; TO=CURPOS+COUNT
+	POPF
+	JNZ	@SCNDRV@_MVCH21  ; BRIF count not zero, do move
+	MOV	BH,DH  ; All characters to move overflowed
+	JMP	@SCNDRV@_MVCH22  ; Just update terminator to current posn
+@SCNDRV@_MVCH21:	CALL	@SCNDRV@_SCROL2  ; Move over characters
+	ADD	BH,CH  ; New TERMPOS=TO+number of characters moved
 	DEC	BH
-MVCH22:	POP	CX		; CH=-(No. of bytes wrapped)
+@SCNDRV@_MVCH22:	POP	CX  ; CH=-(No. of bytes wrapped)
 ;CH=overflow count, CL=insert count, BH=terminator posn
-MVCH23:	CALL	SCNRDT
-	JB	MVCH25
-	JZ	MVCH25
+@SCNDRV@_MVCH23:	CALL	@SCNRDT
+	JB	@SCNDRV@_MVCH25
+	JZ	@SCNDRV@_MVCH25
 ;We have wrapped chars, terminate either WRAP or NULL_WRAP
-MVCH24:	CMP	BH,BYTE PTR LINLEN
-	MOV	AL,LOW OFFSET TRMWRP
-	JZ	MVCH26
+@SCNDRV@_MVCH24:	CMP	BH,byte [@LINLEN]
+	MOV	AL,((@TRMWRP) and 0FFh)
+	JZ	@SCNDRV@_MVCH26
 	OR	CH,CH
-	JZ	MVCH26
-	MOV	AL,LOW OFFSET TRMNWP	; Null wrap that does not overflow changes to wrap
-	MOV	BH,BYTE PTR LINLEN
+	JZ	@SCNDRV@_MVCH26
+	MOV	AL,((@TRMNWP) and 0FFh)  ; Null wrap that does not overflow changes to wrap
+	MOV	BH,byte [@LINLEN]
 	PUSH	AX
 	PUSH	DX
 	MOV	DH,BH
-	MOV	AX," "		; Blank DBLCHR destroyed by scroll
-	CALL	SCROUT
+	MOV	AX," "  ; Blank DBLCHR destroyed by scroll
+	CALL	@SCROUT
 	POP	DX
 	POP	AX
-	JMP	SHORT MVCH26
+	JMP	@SCNDRV@_MVCH26
 ;Was EOL or LF terminated
-MVCH25:	OR	CH,CH
-	JNZ	MVCH24		; Overflow means WRAP or NULL_WRAP
-MVCH26:	CMP	AH,BH
-	JA	MVCH27		; Terminator beyond scroll end
+@SCNDRV@_MVCH25:	OR	CH,CH
+	JNZ	@SCNDRV@_MVCH24  ; Overflow means WRAP or NULL_WRAP
+@SCNDRV@_MVCH26:	CMP	AH,BH
+	JA	@SCNDRV@_MVCH27  ; Terminator beyond scroll end
 	MOV	AH,BH
 ;AH=New terminator, CL=insert count
-	CALL	SCNWTT		; Update terminator
-MVCH27:	CMP	DL,BYTE PTR LSTLIN
-	JNZ	MVCHEX		; BRIF move is not on LSTPOS line
-	CMP	BH,BYTE PTR LSTCOL
-	JBE	MVCHEX		; BRIF end of move is before LSTPOS
-	MOV	BYTE PTR LSTCOL,BH	; Else add number moved over to LSTPOS
-MVCHEX:	POP	DI
-	RET	
+	CALL	@SCNDRV@_SCNWTT  ; Update terminator
+@SCNDRV@_MVCH27:	CMP	DL,byte [@LSTLIN]
+	JNZ	@SCNDRV@_MVCHEX  ; BRIF move is not on LSTPOS line
+	CMP	BH,byte [@LSTCOL]
+	JBE	@SCNDRV@_MVCHEX  ; BRIF end of move is before LSTPOS
+	MOV	byte [@LSTCOL],BH  ; Else add number moved over to LSTPOS
+@SCNDRV@_MVCHEX:	POP	DI
+	RET
 ;Inserting beyond end of logical
-MVCH30:	MOV	CL,CH		; Save insert count in CL
-	ADD	CH,DH		; CH=end of insert
-	CMP	AL,LOW OFFSET TRMLNF
-	JZ	MVCH31		; BRIF LF term'd cannot push null off end
-	DEC	CH		; Ignore one null push off end of physical
-MVCH31:	CMP	CH,BYTE PTR LINLEN
-	JBE	MVCH33		; BRIF have room
+@SCNDRV@_MVCH30:	MOV	CL,CH  ; Save insert count in CL
+	ADD	CH,DH  ; CH=end of insert
+	CMP	AL,((@TRMLNF) and 0FFh)
+	JZ	@SCNDRV@_MVCH31  ; BRIF LF term'd cannot push null off end
+	DEC	CH  ; Ignore one null push off end of physical
+@SCNDRV@_MVCH31:	CMP	CH,byte [@LINLEN]
+	JBE	@SCNDRV@_MVCH33  ; BRIF have room
 ;No room, return blanks overflow, update terminator
-	SUB	CH,BYTE PTR LINLEN	; CH=No. of overflow bytes
+	SUB	CH,byte [@LINLEN]  ; CH=No. of overflow bytes
 	MOV	AX," "
 	PUSH	CX
-MVCH32:	CLD			; Store overflow bytes(All blanks)
+@SCNDRV@_MVCH32:	CLD  ; Store overflow bytes(All blanks)
 	STOSW
 	DEC	CH
-	JNZ	MVCH32
-	POP	CX		; Restore CH=number of overflow bytes
+	JNZ	@SCNDRV@_MVCH32
+	POP	CX  ; Restore CH=number of overflow bytes
 	POP	BX
 	MOV	BH,CH
-	PUSH	BX		; Put overflow count with original CL on stack
-	MOV	BH,BYTE PTR LINLEN	; BH=term posn, CH=overflow count, CL=insert count
-	JMP	SHORT MVCH23	; Update terminator and LSTPOS, exit
+	PUSH	BX  ; Put overflow count with original CL on stack
+	MOV	BH,byte [@LINLEN]  ; BH=term posn, CH=overflow count, CL=insert count
+	JMP	@SCNDRV@_MVCH23  ; Update terminator and LSTPOS, exit
 ;Have room, just update terminator
-MVCH33:	POP	BX
-	MOV	BH,LOW 0	; Put overflow count(=0) on stack for return
-	XCHG	BH,CH		; BH=term posn, CH=overflow count, CL=insert count
-	JMP	SHORT MVCH23	; New term posn still .LTE. LINLEN
-COMMENT	%
-;On LSTLIN, possibly insert to LSTPOS or LSTPOS+COUNT
-;N.B. We are guaranteed to be at a posn to left of TERM_POS
-;Two cases: insert up to LSTPOS or insert up to LSTPOS+COUNT
-MVCH80: PUSH    DX
-	PUSH    CX
-	PUSH    AX
-	MOVB    CL,AH           ; Save TERM_POS in CL for compare
-	MOVB    DH,LSTCOL
-;Scan from LSTPOS+1 to lesser of (LSTPOS+COUNT,TERM_POS) or non-blank character
-MVCH81: INCB    DH              ; Next column
-IFN     IBMLIK,<
-	CLC                     ; Indicate call is from Screen Editor
->                               ; IFN IBMLIK
-	CALL    SCRINP          ; AX=character at this posn
-IFN     DBLCHR,<
-	JNB     MVCH82          ; BRIF not reading second of double byte char
-	INCB    DH              ; Restore DH(SCRINP decremented it)
->                               ; IFN DBLCHR
-MVCH82: CMPI    AX," "
-	JNZ     MVCH86          ; Found non-blank
-	CMPB    DH,CL
-	JAE     MVCH84          ; At TERM_POS
-MVCH83: DECB    CH
-	JNZ     MVCH81          ; Not at LSTPOS+COUNT, continue scan
-;Insert to LSTPOS+COUNT [;or TERM_POS+COUNT, whichever is smaller]
-MVCH84: POP     AX
-	POP     CX
-	POP     DX
-	MOVB    AH,LSTCOL       ; Change end of FROM insert window to LSTPOS
-MVCH85: JMP     MVCH03          ; Insert to LSTPOS
-;Insert to last blank after LSTPOS
-MVCH86: POP     AX              ; AX=current terminators
-	POP     BX              ; BH=Count desired
-	MOVB    CH,DH           ; CH=end of TO insert window
-	DECB    CH
-	POP     DX              ; (DH,DL)=current posn
-	ADDB    BH,DH           ; BH=start of TO insert window
-	SUBB    CH,BH           ; CH=character count to move
-	JB      MVCH89          ; BRIF at end, just overwrite last char
-	INCB    CH
-	MOVBI   CL,1            ; Move on one line
-	MOVB    BL,DL           ; (BH,BL)=start of TO window
-	MOV     AX,DX           ; (AH,AL)=start of FROM window
-IFN     DBLCHR,<
-	PUSH    DX
-	PUSH    AX
-	MOV     DX,AX
-	ADDB    DH,CH
-IFN     IBMLIK,<
-	CLC                     ; Indicate call is from Screen Editor
->                               ; IFN IBMLIK
-	CALL    SCRINP          ; Are we going to scroll half of a double byte char?
-	MOVI    AX," "
-	JNB     MVCH88
-	INCB    DH
-MVCH88: CALL    SCROUT          ; Obliterate double byte char scrolled on top of
-	POP     AX
-	POP     DX
->                               ; IFN DBLCHR
-	CALL    SCROL2          ; Move characters over
-MVCH89: POP     CX
-	XORB    CH,CH           ; No characters wrapped
-	JMP     MVCHEX          ; All done
-%
+@SCNDRV@_MVCH33:	POP	BX
+	MOV	BH,((0) and 0FFh)  ; Put overflow count(=0) on stack for return
+	XCHG	BH,CH  ; BH=term posn, CH=overflow count, CL=insert count
+	JMP	@SCNDRV@_MVCH23  ; New term posn still .LTE. LINLEN
+; COMMENT	%
+; ;On LSTLIN, possibly insert to LSTPOS or LSTPOS+COUNT
+; ;N.B. We are guaranteed to be at a posn to left of TERM_POS
+; ;Two cases: insert up to LSTPOS or insert up to LSTPOS+COUNT
+; MVCH80: PUSH    DX
+; 	PUSH    CX
+; 	PUSH    AX
+; 	MOVB    CL,AH           ; Save TERM_POS in CL for compare
+; 	MOVB    DH,LSTCOL
+; ;Scan from LSTPOS+1 to lesser of (LSTPOS+COUNT,TERM_POS) or non-blank character
+; MVCH81: INCB    DH              ; Next column
+; IFN     IBMLIK,<
+; 	CLC                     ; Indicate call is from Screen Editor
+; >                               ; IFN IBMLIK
+; 	CALL    SCRINP          ; AX=character at this posn
+; IFN     DBLCHR,<
+; 	JNB     MVCH82          ; BRIF not reading second of double byte char
+; 	INCB    DH              ; Restore DH(SCRINP decremented it)
+; >                               ; IFN DBLCHR
+; MVCH82: CMPI    AX," "
+; 	JNZ     MVCH86          ; Found non-blank
+; 	CMPB    DH,CL
+; 	JAE     MVCH84          ; At TERM_POS
+; MVCH83: DECB    CH
+; 	JNZ     MVCH81          ; Not at LSTPOS+COUNT, continue scan
+; ;Insert to LSTPOS+COUNT [;or TERM_POS+COUNT, whichever is smaller]
+; MVCH84: POP     AX
+; 	POP     CX
+; 	POP     DX
+; 	MOVB    AH,LSTCOL       ; Change end of FROM insert window to LSTPOS
+; MVCH85: JMP     MVCH03          ; Insert to LSTPOS
+; ;Insert to last blank after LSTPOS
+; MVCH86: POP     AX              ; AX=current terminators
+; 	POP     BX              ; BH=Count desired
+; 	MOVB    CH,DH           ; CH=end of TO insert window
+; 	DECB    CH
+; 	POP     DX              ; (DH,DL)=current posn
+; 	ADDB    BH,DH           ; BH=start of TO insert window
+; 	SUBB    CH,BH           ; CH=character count to move
+; 	JB      MVCH89          ; BRIF at end, just overwrite last char
+; 	INCB    CH
+; 	MOVBI   CL,1            ; Move on one line
+; 	MOVB    BL,DL           ; (BH,BL)=start of TO window
+; 	MOV     AX,DX           ; (AH,AL)=start of FROM window
+; IFN     DBLCHR,<
+; 	PUSH    DX
+; 	PUSH    AX
+; 	MOV     DX,AX
+; 	ADDB    DH,CH
+; IFN     IBMLIK,<
+; 	CLC                     ; Indicate call is from Screen Editor
+; >                               ; IFN IBMLIK
+; 	CALL    SCRINP          ; Are we going to scroll half of a double byte char?
+; 	MOVI    AX," "
+; 	JNB     MVCH88
+; 	INCB    DH
+; MVCH88: CALL    SCROUT          ; Obliterate double byte char scrolled on top of
+; 	POP     AX
+; 	POP     DX
+; >                               ; IFN DBLCHR
+; 	CALL    SCROL2          ; Move characters over
+; MVCH89: POP     CX
+; 	XORB    CH,CH           ; No characters wrapped
+; 	JMP     MVCHEX          ; All done
+; %
 ;SUBROUTINE SCROL2              ; Used by insert code to move over chars in line
 ;                           On entry:   AH,BH,CH=scroll parameters
-;
-	SCROL2	EQU	SCROLL	; No DBLCHR save/restore
+
+	@SCNDRV@_SCROL2 = @SCROLL  ; No DBLCHR save/restore
 ;SUBROUTINE SCNRTL              ; Read logical terminator for physical line
 ;**                     On entry:   DL=line number
 ;**                     On exit:    AX=terminators
 ;**                                 CF set indicates EOL terminator
 ;**                                 CF clear, ZF set indicates LF terminator
 ;**                                 If NULL_WRAP terminator AH=TERM_POS-1
-SCNRTL:	CALL	SCNRDT		; Get terminators
-	JB	SCNRT2		; BRIF not NULL_WRAP
-	JZ	SCNRT2		; BRIF not NULL_WRAP
-	PUSHF	
-	CMP	AL,LOW OFFSET TRMNWP
-	JNZ	SCNRT1		; BRIF not NULL_WRAP
-	DEC	AH		; Is NULL_WRAP, decrement posn
-SCNRT1:	POPF	
-SCNRT2:	RET	
+@SCNDRV@_SCNRTL:	CALL	@SCNRDT  ; Get terminators
+	JB	@SCNDRV@_SCNRT2  ; BRIF not NULL_WRAP
+	JZ	@SCNDRV@_SCNRT2  ; BRIF not NULL_WRAP
+	PUSHF
+	CMP	AL,((@TRMNWP) and 0FFh)
+	JNZ	@SCNDRV@_SCNRT1  ; BRIF not NULL_WRAP
+	DEC	AH  ; Is NULL_WRAP, decrement posn
+@SCNDRV@_SCNRT1:	POPF
+@SCNDRV@_SCNRT2:	RET
 
 ;Wrap a linefeed(already a successful MKRMNL)
-LFTERM:	PUSH	WORD PTR TRMCUR
+@SCNDRV@_LFTERM:	PUSH	word [@TRMCUR]
 	PUSH	AX
-	CALL	SCNRDT		; Read next line terminator
-	MOV	AL,LOW OFFSET TRMLNF
-	MOV	AH,BYTE PTR WDOLFT
-	CALL	SCNWTT		; Write out LF terminator at left margin plus one
+	CALL	@SCNRDT  ; Read next line terminator
+	MOV	AL,((@TRMLNF) and 0FFh)
+	MOV	AH,byte [@WDOLFT]
+	CALL	@SCNDRV@_SCNWTT  ; Write out LF terminator at left margin plus one
 	POP	AX
-	POP	WORD PTR TRMCUR
-	RET	
-	SUBTTL CURSOR MOVEMENT within window
-
-
+	POP	word [@TRMCUR]
+	RET
+; SUBTTL CURSOR MOVEMENT within window
 
 ;       These routines return CF=1 when they do not change the posn.
-;
+
 ;Cursor right within window(or within physical line if outside window)
-CSRADV:	INC	DH		; Next column
-	CMP	BYTE PTR LINLEN,DH
-	JAE	CSRRET		; BRIF Good value
+@SCNDRV@_CSRADV:	INC	DH  ; Next column
+	CMP	byte [@LINLEN],DH
+	JAE	@SCNDRV@_CSRRET  ; BRIF Good value
 	DEC	DH
-	CALL	CSRDWN
-	JB	CSRRET		; BRIF can't change physical lines
-	MOV	DH,BYTE PTR WDOLFT	; First column
-CSRRET:	RET	
+	CALL	@SCNDRV@_CSRDWN
+	JB	@SCNDRV@_CSRRET  ; BRIF can't change physical lines
+	MOV	DH,byte [@WDOLFT]  ; First column
+@SCNDRV@_CSRRET:	RET
 
 ;Cursor left within window(or within physical line if outside window)
-CSRREG:	DEC	DH		; Previous column
-	CMP	DH,BYTE PTR WDOLFT
-	JNB	CSRRET		; BRIF good value
-	INC	DH		; Restore column
-	CALL	CSRUP
-	JB	CSRRET		; BRIF can't change physical lines
-	MOV	DH,BYTE PTR LINLEN	; Last column
-	RET	
+@SCNDRV@_CSRREG:	DEC	DH  ; Previous column
+	CMP	DH,byte [@WDOLFT]
+	JNB	@SCNDRV@_CSRRET  ; BRIF good value
+	INC	DH  ; Restore column
+	CALL	@SCNDRV@_CSRUP
+	JB	@SCNDRV@_CSRRET  ; BRIF can't change physical lines
+	MOV	DH,byte [@LINLEN]  ; Last column
+	RET
 
 ;Cursor up within window(or NOP if outside window)
-CSRUP:	CMP	BYTE PTR WDOBOT,DL
-	JB	CSRRET		; BRIF outside of window
-	CMP	DL,BYTE PTR WDOTOP
-	JB	CSRRET
-	STC	
-	JZ	CSRRET		; BRIF at top or outside of window
-	CLC	
+@SCNDRV@_CSRUP:	CMP	byte [@WDOBOT],DL
+	JB	@SCNDRV@_CSRRET  ; BRIF outside of window
+	CMP	DL,byte [@WDOTOP]
+	JB	@SCNDRV@_CSRRET
+	STC
+	JZ	@SCNDRV@_CSRRET  ; BRIF at top or outside of window
+	CLC
 	DEC	DL
-	RET	
+	RET
 
 ;Cursor down within window(or NOP if outside window)
-CSRDWN:	CMP	DL,BYTE PTR WDOTOP
-	JB	CSRRET		; BRIF outside window
-	CMP	BYTE PTR WDOBOT,DL
-	JB	CSRRET		; BRIF at bottom or outside of window
-	STC	
-	JZ	CSRRET
-	CLC	
-	INC	DL		; Next line
-	RET	
-	SUBTTL CURSOR MOVEMENT within logical line
-
-
+@SCNDRV@_CSRDWN:	CMP	DL,byte [@WDOTOP]
+	JB	@SCNDRV@_CSRRET  ; BRIF outside window
+	CMP	byte [@WDOBOT],DL
+	JB	@SCNDRV@_CSRRET  ; BRIF at bottom or outside of window
+	STC
+	JZ	@SCNDRV@_CSRRET
+	CLC
+	INC	DL  ; Next line
+	RET
+; SUBTTL CURSOR MOVEMENT within logical line
 
 ;Cursor advance within logical line
 ;                   on entry:   DH=current column, DL=current line
@@ -2365,102 +2305,200 @@ CSRDWN:	CMP	DL,BYTE PTR WDOTOP
 ;                                   Else DH=EOL column, DL=EOL line
 ;                                   ZF=1 if stop at LSTPOS
 ;                               AH=terminator column, AL=terminator value
-;
-LCSADV:	CMP	DL,BYTE PTR LSTLIN
-	JNZ	LCSAD0		; BRIF not at LSTPOS
-	CMP	DH,BYTE PTR LSTCOL
-	JB	LCSAD0		; BRIF not at LSTPOS
-	CALL	SCNRDT
-	CMP	AH,AH		; Set ZF=1 if stop at LSTPOS
-	STC	
-LCSADX:	RET	
-LCSAD0:	CALL	SCNRDT
-	JB	LCSAD2		; BRIF at last line
-LCSAD1:	CALL	CSRADV
-	JB	LCSADA		; BRIF at end of window
+
+@SCNDRV@_LCSADV:	CMP	DL,byte [@LSTLIN]
+	JNZ	@SCNDRV@_LCSAD0  ; BRIF not at LSTPOS
+	CMP	DH,byte [@LSTCOL]
+	JB	@SCNDRV@_LCSAD0  ; BRIF not at LSTPOS
+	CALL	@SCNRDT
+	CMP	AH,AH  ; Set ZF=1 if stop at LSTPOS
+	STC
+@SCNDRV@_LCSADX:	RET
+@SCNDRV@_LCSAD0:	CALL	@SCNRDT
+	JB	@SCNDRV@_LCSAD2  ; BRIF at last line
+@SCNDRV@_LCSAD1:	CALL	@SCNDRV@_CSRADV
+	JB	@SCNDRV@_LCSADA  ; BRIF at end of window
 	CMP	AH,DH
-	JNB	LCSADX		; BRIF within logical line
+	JNB	@SCNDRV@_LCSADX  ; BRIF within logical line
 	INC	DL
-	MOV	DH,BYTE PTR WDOLFT	; Else wrap to next physical of logical
-	CLC	
-	RET	
-LCSAD2:	CMP	AH,DH
-	JA	LCSAD1		; BRIF not at EOL or beyond
-LCSADA:	OR	DH,DH		; ZF=1(not stop at LSTPOS)
-	STC	
-	RET	
+	MOV	DH,byte [@WDOLFT]  ; Else wrap to next physical of logical
+	CLC
+	RET
+@SCNDRV@_LCSAD2:	CMP	AH,DH
+	JA	@SCNDRV@_LCSAD1  ; BRIF not at EOL or beyond
+@SCNDRV@_LCSADA:	OR	DH,DH  ; ZF=1(not stop at LSTPOS)
+	STC
+	RET
 ;Cursor regress within logical line
 ;                   on entry:   DH=current column, DL=current line
 ;                   on exit:    If CF clear, DH=new column, DL=new line
 ;                                   Else DH=EOL column, DL=EOL line
 ;                                   If stop at FSTPOS, ZF is set
-;
-LCSREG:	CMP	DL,BYTE PTR FSTLIN
-	JNZ	LCSRG0		; BRIF not at FSTPOS
-	CMP	DH,BYTE PTR FSTCOL
-	JA	LCSRG0		; BRIF not at FSTPOS
-	STC	
-	RET			; ZF=1, CF=1, stop at FSTPOS
-LCSRG0:	PUSH	BX
+
+@SCNDRV@_LCSREG:	CMP	DL,byte [@FSTLIN]
+	JNZ	@SCNDRV@_LCSRG0  ; BRIF not at FSTPOS
+	CMP	DH,byte [@FSTCOL]
+	JA	@SCNDRV@_LCSRG0  ; BRIF not at FSTPOS
+	STC
+	RET  ; ZF=1, CF=1, stop at FSTPOS
+@SCNDRV@_LCSRG0:	PUSH	BX
 	MOV	BX,DX
-	CALL	CSRREG
-	JB	LCSRGA		; BRIF at top of window
+	CALL	@SCNDRV@_CSRREG
+	JB	@SCNDRV@_LCSRGA  ; BRIF at top of window
 	CMP	BL,DL
-	JZ	LCSRGX		; BRIF on same line, must be good posn
-	CALL	SCNRDT
-	JNB	LCSRGX		; BRIF still on same logical line
-	MOV	DL,BL		; Move back to line we were on
-	MOV	DH,BYTE PTR WDOLFT	; And posn at start of that line
-LCSRGA:	OR	DH,DH		; ZF=0(not stop at FSTPOS)
-	STC	
-LCSRGX:	POP	BX
-	RET			; Return CF set(at EOL)
+	JZ	@SCNDRV@_LCSRGX  ; BRIF on same line, must be good posn
+	CALL	@SCNRDT
+	JNB	@SCNDRV@_LCSRGX  ; BRIF still on same logical line
+	MOV	DL,BL  ; Move back to line we were on
+	MOV	DH,byte [@WDOLFT]  ; And posn at start of that line
+@SCNDRV@_LCSRGA:	OR	DH,DH  ; ZF=0(not stop at FSTPOS)
+	STC
+@SCNDRV@_LCSRGX:	POP	BX
+	RET  ; Return CF set(at EOL)
 
-LSTART:
-LSTRT0:	CMP	DL,BYTE PTR FSTLIN
-	JZ	LSTRT1
-	CALL	CSRUP
-	JB	LSTRT1		; Top of window must be start of line
-	CALL	SCNRDT
-	JNB	LSTRT0		; BRIF this line is part of logical
+@SCNDRV@_LSTART:
+@SCNDRV@_LSTRT0:	CMP	DL,byte [@FSTLIN]
+	JZ	@SCNDRV@_LSTRT1
+	CALL	@SCNDRV@_CSRUP
+	JB	@SCNDRV@_LSTRT1  ; Top of window must be start of line
+	CALL	@SCNRDT
+	JNB	@SCNDRV@_LSTRT0  ; BRIF this line is part of logical
 	INC	DL
-LSTRT1:	MOV	DH,BYTE PTR WDOLFT
-	JB	LSTRTX		; BRIF not using FSTPOS, use left margin
-	MOV	DH,BYTE PTR FSTCOL
-LSTRTX:	RET	
-	SUBTTL  MISCELLANEOUS ROUTINES
-
-
+@SCNDRV@_LSTRT1:	MOV	DH,byte [@WDOLFT]
+	JB	@SCNDRV@_LSTRTX  ; BRIF not using FSTPOS, use left margin
+	MOV	DH,byte [@FSTCOL]
+@SCNDRV@_LSTRTX:	RET
+; SUBTTL  MISCELLANEOUS ROUTINES
 
 ;*********************************************************
 ;CHECK FOR WORD OR NON-WORD CHAR(ALPHA NUMERIC)
-;
-ANCHK:	PUSH	DX
-	CLC			; Indicate call is from Screen Editor
-	CALL	SCRINP		; Read character at current posn in DX
-	JNB	ANCH0		; BRIF DH was not decremented
-	INC	DH
-ANCH0:	OR	AH,AH
-	JNZ	ANCNO		; BRIF is two-byte character - reject
-	CMP	AL,LOW 60O
-	JB	ANCNO		; BRIF is not alpha-numeric
-	CMP	AL,LOW 72O
-	JB	ANYES		; BRIF is numeric
-	CMP	AL,LOW 101O
-	JB	ANCNO		; BRIF is not alpha-numeric
-	CMP	AL,LOW 133O
-	JB	ANYES		; BRIF is alpha
-	CMP	AL,LOW 141O
-	JB	ANCNO		; BRIF is not alpha-numeric
-	CMP	AL,LOW 173O
-	JB	ANYES		; BRIF is small alpha
-ANCNO:	STC	
-	POP	DX
-	RET	
 
-ANYES:	CLC	
+@SCNDRV@_ANCHK:	PUSH	DX
+	CLC  ; Indicate call is from Screen Editor
+	CALL	@SCRINP  ; Read character at current posn in DX
+	JNB	@SCNDRV@_ANCH0  ; BRIF DH was not decremented
+	INC	DH
+@SCNDRV@_ANCH0:	OR	AH,AH
+	JNZ	@SCNDRV@_ANCNO  ; BRIF is two-byte character - reject
+	CMP	AL,((48) and 0FFh)
+	JB	@SCNDRV@_ANCNO  ; BRIF is not alpha-numeric
+	CMP	AL,((58) and 0FFh)
+	JB	@SCNDRV@_ANYES  ; BRIF is numeric
+	CMP	AL,((65) and 0FFh)
+	JB	@SCNDRV@_ANCNO  ; BRIF is not alpha-numeric
+	CMP	AL,((91) and 0FFh)
+	JB	@SCNDRV@_ANYES  ; BRIF is alpha
+	CMP	AL,((97) and 0FFh)
+	JB	@SCNDRV@_ANCNO  ; BRIF is not alpha-numeric
+	CMP	AL,((123) and 0FFh)
+	JB	@SCNDRV@_ANYES  ; BRIF is small alpha
+@SCNDRV@_ANCNO:	STC
 	POP	DX
-	RET	
-CSEG	ENDS
-	END
-                                                                             
+	RET
+
+@SCNDRV@_ANYES:	CLC
+	POP	DX
+	RET
+end if
+
+; ---- end of translation unit: drop its file-scoped macros ----
+purge @@QZ0
+purge @@Qz0
+purge @ACRLF
+purge @acrlf
+purge @ADD_EXT
+purge @add_ext
+purge @ADR
+purge @adr
+purge @ADRP
+purge @adrp
+purge @CALLOS
+purge @callos
+purge @CHRGET
+purge @chrget
+purge @COMPAR
+purge @compar
+purge @CPMXIO
+purge @cpmxio
+purge @DC
+purge @dc
+purge @DCE
+purge @dce
+purge @DCL
+purge @dcl
+purge @DCUL
+purge @dcul
+purge @DEF_MAC
+purge @def_mac
+purge @DERMAK
+purge @dermak
+purge @DEV
+purge @dev
+purge @DJNZ
+purge @djnz
+purge @DOSIO
+purge @dosio
+purge @DO_EXT
+purge @do_ext
+purge @EXPAND_MAC
+purge @expand_mac
+purge @FSIGN
+purge @fsign
+purge @GETYPE
+purge @getype
+purge @HLFDE
+purge @hlfde
+purge @HLFHL
+purge @hlfhl
+purge @INS86
+purge @ins86
+purge @INST
+purge @inst
+purge @LDDR
+purge @lddr
+purge @LDIR
+purge @ldir
+purge @M
+purge @m
+purge @MOVRI
+purge @movri
+purge @NAMES
+purge @names
+purge @NDEV
+purge @ndev
+purge @NEGDE
+purge @negde
+purge @NEGHL
+purge @neghl
+purge @OUTCHR
+purge @outchr
+purge @PDIRAM
+purge @pdiram
+purge @PDURAM
+purge @pduram
+purge @POPR
+purge @popr
+purge @PUSHM
+purge @pushm
+purge @PUSHR
+purge @pushr
+purge @Q
+purge @q
+purge @QF
+purge @qf
+purge @R
+purge @r
+purge @R1
+purge @r1
+purge @R2
+purge @r2
+purge @RINIT
+purge @rinit
+purge @ROFFST
+purge @roffst
+purge @SYNCHK
+purge @synchk
+purge @T
+purge @t
+purge @UN_DEF
+purge @un_def
