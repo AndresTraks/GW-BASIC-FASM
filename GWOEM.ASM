@@ -268,17 +268,48 @@ macro MARK col, ch {
         ret
 
 ; ---------------------------------------------------------------------------
-; CSRDSP - GWSTS: called after CSRFLG changed, with AL the new cursor type;
-; 0 means off.  Uses the BIOS so the hardware cursor shape is right.
+; CSRDSP - GWSTS, for LOCATE: "MOV DX,AX ;Load cursor position / MOV AL,3
+; ;Signal for user cursor / CALL CSRDSP ;Set cursor", where that AX has just
+; been through SCNLOC, which is "MOV CSRX,AH / MOV CSRY,AL".  So DH is the
+; column and DL the row, both 1-based, and AL is the cursor type: 0 off, 1
+; insert, 2 overwrite, 3 user.  Every other caller arrives through SETCSR,
+; which the call sites precede with SCNPOS -- "DH=column, DL=row" -- so the
+; position is always there behind it.
+;
+; Both halves matter here.  SCROUT writes characters straight into the buffer,
+; so the hardware cursor moves only when this routine moves it: left to the
+; shape alone, it stays wherever DOS left it before GW-BASIC cleared the
+; screen, which is the bottom of it.
 @CSRDSP:
         MARK 18,'C'
         push    ax
         push    bx
         push    cx
         push    dx
+        push    ax                      ; the type, for once the cursor is put
+        mov     cl, dl                  ; GW-BASIC counts DH column, DL row,
+        mov     dl, dh                  ;  from one; the BIOS counts DH row,
+        mov     dh, cl                  ;  DL column, from zero
+        dec     dh
+        dec     dl
+        xor     bh, bh                  ; page 0
+        mov     ah, 2
+        int     10h
+        pop     ax
         or      al, al
         jz      @@csr_off
-        mov     cx, 0607h               ; a normal underline cursor
+        cmp     word [cs:@GWOEM_VSEG], 0B000h
+        je      @@csr_mono
+        mov     cx, 0607h               ; a colour cell is eight lines high
+        cmp     al, 1
+        jne     @@csr_set
+        mov     cx, 0407h               ; insert mode: half the cell
+        jmp     @@csr_set
+@@csr_mono:
+        mov     cx, 0C0Dh               ; a monochrome cell is fourteen
+        cmp     al, 1
+        jne     @@csr_set
+        mov     cx, 070Dh
         jmp     @@csr_set
 @@csr_off:
         mov     cx, 2000h               ; bit 5 set = cursor off
