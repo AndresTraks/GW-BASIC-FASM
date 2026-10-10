@@ -226,6 +226,9 @@ macro MARK col, ch {
         ret
 
 ; One row of a block move: source (AL,AH), destination (BL,BH), CH columns.
+; Within the row the two can overlap in either direction: SCNDRV's MVCH20 opens
+; up space for an insert with "TO=CURPOS+COUNT" on the same line, and a copy
+; that ran forward over that would smear the first character across the rest.
 @GWOEM_SCROW:
         push    ax
         push    cx
@@ -241,8 +244,23 @@ macro MARK col, ch {
         xor     ch, ch
         push    ds
         mov     ds, [cs:@GWOEM_VSEG]
+        cmp     di, si
+        jbe     @@sr_fwd                ; destination at or before the source
+        push    ax                      ; after it: run the copy from the end
+        mov     ax, cx
+        dec     ax
+        add     ax, ax
+        add     si, ax
+        add     di, ax
+        pop     ax
+        std
+        rep     movsw
+        cld
+        jmp     @@sr_done
+@@sr_fwd:
         cld
         rep     movsw
+@@sr_done:
         pop     ds
         pop     dx
         pop     cx
