@@ -292,26 +292,118 @@ macro MARK col, ch {
         ret
 
 ; SWIDTH - GWSTS: "MOV AL,DL ;pass Width in AL / MOV CL,LINCNT ;pass Height in
-; CL / CALL SWIDTH ;Let screen editor set width".  Only the width this layer
-; was built for is accepted; anything else returns carry for "Illegal function
-; call".
+; CL / CALL SWIDTH ;Let screen editor set width", and on return "JB GFCERR".
+; The caller does nothing else, so setting the hardware and telling the screen
+; driver are both this routine's job -- the same pair GWINI does.
 @SWIDTH:
         MARK 20,'W'
         push    ax
-        cmp     al, [cs:@GWOEM_WIDTH]
-        pop     ax
+        push    bx
+        push    cx
+        push    dx
+        cmp     cl, [cs:@GWOEM_HEIGHT]  ; one height, and no 43-line EGA here
         jne     @@sw_bad
+        cmp     word [cs:@GWOEM_VSEG], 0B000h
+        je      @@sw_mono
+        cmp     al, 40
+        je      @@sw_set
+        cmp     al, 80
+        je      @@sw_set
+        jmp     @@sw_bad
+@@sw_mono:
+        cmp     al, 80                  ; the monochrome adapter has one width
+        jne     @@sw_bad
+        jmp     @@sw_tell
+@@sw_set:
+        push    ds
+        mov     bx, 40h
+        mov     ds, bx
+        mov     bl, [ds:49h]            ; the mode in use ...
+        pop     ds
+        and     bl, 1                   ; ... for its colour burst, 0 or 1
+        cmp     al, 40
+        jne     @@sw_wide
+        mov     al, bl                  ; 40 columns: BIOS mode 0 or 1
+        xor     ah, ah
+        int     10h
+        mov     al, 40
+        jmp     @@sw_tell
+@@sw_wide:
+        mov     al, 2                   ; 80 columns: BIOS mode 2 or 3
+        add     al, bl
+        xor     ah, ah
+        int     10h
+        mov     al, 80
+@@sw_tell:
+        mov     [cs:@GWOEM_WIDTH], al
+        mov     cl, [cs:@GWOEM_HEIGHT]
+        call    @SCNSWI                 ; LINLEN, CRTWID, WDORGT, status line
+        call    @CLRSCN
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
         clc
         ret
 @@sw_bad:
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
         stc
         ret
 
 ; SCRSTT - GWSTS: "CALL SCRSTT ;Process params / JB FCERGO ;Error detected in
-; low level routine".  This layer has no graphics, so every SCREEN request is
-; refused and the pixel primitives are never reached.
+; low level routine", with BX pointing at the parameter list GTPRMS built in
+; BUF.  GWSTS describes it: "a list which is headed by a one word parameter
+; count.  The remaining list entries are two bytes long.  The first byte is 0
+; if the SCREEN parameter was null.  The second byte is the parameter value".
+;
+; SCREEN mode, burst, apage, vpage.  The only screen here is the text one, so
+; mode 0 is accepted and everything else refused -- which keeps the graphics
+; primitives unreachable.  The burst is meaningless without composite output
+; and is ignored; the pages must be 0, there being one of them.
 @SCRSTT:
         MARK 22,'S'
+        push    ax
+        push    cx
+        push    si
+        mov     si, bx
+        mov     cl, [si]                ; the parameter count
+        xor     ch, ch
+        inc     si
+        jcxz    @@ss_ok
+        cmp     byte [si], 0
+        je      @@ss_burst              ; a null mode leaves the screen alone
+        cmp     byte [si+1], 0
+        jne     @@ss_bad                ; any other mode wants graphics
+@@ss_burst:
+        add     si, 2
+        dec     cx
+        jcxz    @@ss_ok
+        add     si, 2                   ; the burst, which text mode ignores
+        dec     cx
+        jcxz    @@ss_ok
+@@ss_page:
+        cmp     byte [si], 0
+        je      @@ss_pnext
+        cmp     byte [si+1], 0
+        jne     @@ss_bad                ; one page, so only page 0
+@@ss_pnext:
+        add     si, 2
+        dec     cx
+        jcxz    @@ss_ok
+        jmp     @@ss_page
+@@ss_ok:
+        pop     si
+        pop     cx
+        pop     ax
+        clc
+        ret
+@@ss_bad:
+        pop     si
+        pop     cx
+        pop     ax
         stc
         ret
 
@@ -500,6 +592,14 @@ macro MARK col, ch {
 ; unreachable; the sound, light pen, joystick and serial entry points return
 ; without doing anything.
 
+; PIXSIZ - GENGRP: "CALL PIXSIZ ;Test for graphics capability / OR AL,AL /
+; JNZ ... / JMP FCERR ;Graphics not available".  Zero is the answer here, and
+; it has to be said explicitly: left to chance, whatever happened to be in AL
+; let PSET and DRAW through while LINE, CIRCLE and PAINT were refused.
+@PIXSIZ:
+        xor     al, al
+        ret
+
 @SETC:
 @READC:
 @STOREC:
@@ -517,7 +617,6 @@ macro MARK col, ch {
 @NREAD:
 @NWRITE:
 @NSETCX:
-@PIXSIZ:
 @GRPSIZ:
 @GTASPC:
 @PGINIT:
