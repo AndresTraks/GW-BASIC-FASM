@@ -82,6 +82,8 @@ macro MARK col, ch {
 ; turns it into ESCFLG); this implementation never reports one.
 @SCROUT:
         MARK 4,'3'
+        cmp     byte [cs:@GWOEM_GMODE], 0
+        jne     @GWOEM_GSCROUT
         push    es
         push    di
         push    ax
@@ -99,6 +101,8 @@ macro MARK col, ch {
 ; call comes from the SCREEN function, which makes no difference here.
 @SCRINP:
         MARK 12,'I'
+        cmp     byte [cs:@GWOEM_GMODE], 0
+        jne     @GWOEM_GSCRINP
         push    es
         push    di
         call    @GWOEM_VIDPOS
@@ -111,6 +115,8 @@ macro MARK col, ch {
 ; CLREOL - SCNDRV: "Clear to end of line from (DH,DL)".
 @CLREOL:
         MARK 14,'E'
+        cmp     byte [cs:@GWOEM_GMODE], 0
+        jne     @GWOEM_GCLREOL
         push    es
         push    di
         push    ax
@@ -152,6 +158,11 @@ macro MARK col, ch {
         push    si
         push    di
         push    es
+        cmp     byte [cs:@GWOEM_GMODE], 0
+        je      @@cl_text
+        call    @GWOEM_GCLRSCN
+        jmp     @@cl_tell
+@@cl_text:
         mov     es, [cs:@GWOEM_VSEG]
         xor     di, di
         mov     al, [cs:@GWOEM_WIDTH]
@@ -161,6 +172,7 @@ macro MARK col, ch {
         mov     ah, [cs:@GWOEM_ATTR]
         cld
         rep     stosw
+@@cl_tell:
         call    @SCNCLR
         pop     es
         pop     di
@@ -178,6 +190,11 @@ macro MARK col, ch {
 ; Source and destination overlap, so the row order follows the direction.
 @SCROLL:
         MARK 16,'L'
+        cmp     byte [cs:@GWOEM_GMODE], 0
+        je      @@sl_text
+        call    @GWOEM_GSCROLL
+        jnc     @@sl_done
+@@sl_text:
         push    es
         push    ds
         push    ax
@@ -224,12 +241,16 @@ macro MARK col, ch {
         pop     ds
         pop     es
         ret
+@@sl_done:
+        ret
 
 ; One row of a block move: source (AL,AH), destination (BL,BH), CH columns.
 ; Within the row the two can overlap in either direction: SCNDRV's MVCH20 opens
 ; up space for an insert with "TO=CURPOS+COUNT" on the same line, and a copy
 ; that ran forward over that would smear the first character across the rest.
 @GWOEM_SCROW:
+        cmp     byte [cs:@GWOEM_GMODE], 0
+        jne     @GWOEM_GSCROW
         push    ax
         push    cx
         push    dx
@@ -385,55 +406,69 @@ macro MARK col, ch {
         ret
 
 ; SCRSTT - GWSTS: "CALL SCRSTT ;Process params / JB FCERGO ;Error detected in
-; low level routine", with BX pointing at the parameter list GTPRMS built in
-; BUF.  GWSTS describes it: "a list which is headed by a one word parameter
-; count.  The remaining list entries are two bytes long.  The first byte is 0
-; if the SCREEN parameter was null.  The second byte is the parameter value".
+; low level routine", with BX pointing at the parameter list GTPRMS built.
+; GWSTS describes it: "a list which is headed by a one word parameter count.
+; The remaining list entries are two bytes long.  The first byte is 0 if the
+; SCREEN parameter was null.  The second byte is the parameter value".
 ;
-; SCREEN mode, burst, apage, vpage.  The only screen here is the text one, so
-; mode 0 is accepted and everything else refused -- which keeps the graphics
-; primitives unreachable.  The burst is meaningless without composite output
-; and is ignored; the pages must be 0, there being one of them.
+; SCREEN mode, burst, apage, vpage.  Modes 0, 1 and 2 are the text screen and
+; the two the CGA offers; the burst is meaningless without composite output,
+; and the pages must be 0, there being one of each.
 @SCRSTT:
         MARK 22,'S'
         push    ax
+        push    bx
         push    cx
+        push    dx
         push    si
         mov     si, bx
-        mov     cl, [si]                ; the parameter count
+        mov     cl, [si]
         xor     ch, ch
         inc     si
-        jcxz    @@ss_ok
+        mov     al, [cs:@GWOEM_GMODE]
+        mov     [cs:@GWOEM_GREQ], al    ; a null mode leaves the screen alone
+        jcxz    @@ss_apply
         cmp     byte [si], 0
-        je      @@ss_burst              ; a null mode leaves the screen alone
-        cmp     byte [si+1], 0
-        jne     @@ss_bad                ; any other mode wants graphics
+        je      @@ss_burst
+        mov     al, [si+1]
+        cmp     al, 2
+        ja      @@ss_bad
+        mov     [cs:@GWOEM_GREQ], al
 @@ss_burst:
         add     si, 2
         dec     cx
-        jcxz    @@ss_ok
-        add     si, 2                   ; the burst, which text mode ignores
+        jcxz    @@ss_apply
+        add     si, 2                   ; the burst, which neither screen uses
         dec     cx
-        jcxz    @@ss_ok
+        jcxz    @@ss_apply
 @@ss_page:
         cmp     byte [si], 0
         je      @@ss_pnext
         cmp     byte [si+1], 0
-        jne     @@ss_bad                ; one page, so only page 0
+        jne     @@ss_bad
 @@ss_pnext:
         add     si, 2
         dec     cx
-        jcxz    @@ss_ok
+        jcxz    @@ss_apply
         jmp     @@ss_page
+@@ss_apply:
+        mov     al, [cs:@GWOEM_GREQ]
+        cmp     al, [cs:@GWOEM_GMODE]
+        je      @@ss_ok                 ; already up: leave the screen alone
+        call    @GWOEM_SETMODE
 @@ss_ok:
         pop     si
+        pop     dx
         pop     cx
+        pop     bx
         pop     ax
         clc
         ret
 @@ss_bad:
         pop     si
+        pop     dx
         pop     cx
+        pop     bx
         pop     ax
         stc
         ret
@@ -873,46 +908,963 @@ macro MARK col, ch {
         ret
 
 ; ---------------------------------------------------------------------------
+; Graphics.  SCREEN 1 is 320x200 in four colours, two bits to a pixel; SCREEN 2
+; is 640x200 in two, one bit each.  Both live in the same 16K at B800, the even
+; rows from the start and the odd rows 2000h further on, 80 bytes to a row
+; either way.
+;
+; GW-BASIC calls the pair that locates a pixel a "C" -- GENGRP's own words are
+; "GET POSITION INTO BITMSK AND [H,L]", and FETCHC hands it back as BX and AL.
+; Here that is the offset of the byte and the mask of the pixel within it,
+; which is all the primitives below work from.  Nothing outside this file knows
+; what either half means.
+
+@GWOEM_PLANE  = 2000h                   ; the odd rows start here
+@GWOEM_GROWB  = 80                      ; bytes to a row
+@GWOEM_GPLANE = 100 * @GWOEM_GROWB      ; and a plane holds a hundred of them
+
+@GWOEM_GMODE  db 0                      ; 0 text, or the SCREEN that is up
+@GWOEM_GREQ   db 0                      ; the SCREEN being asked for
+@GWOEM_GBPP   db 0                      ; bits to a pixel
+@GWOEM_GSHIFT db 0                      ; ... as a shift: pixels to a byte
+@GWOEM_GFIRST db 0                      ; mask of the leftmost pixel of a byte
+@GWOEM_GREP   db 0                      ; spreads an attribute over a byte
+@GWOEM_GAMSK  db 0                      ; the bits an attribute may use
+@GWOEM_GMAXX  dw 0                      ; the largest coordinates
+@GWOEM_GMAXY  dw 199
+@GWOEM_GASP   dw 0                      ; aspect ratio, 256ths
+@GWOEM_CADR   dw 0                      ; the current C: the byte ...
+@GWOEM_CMSK   db 0                      ;  ... and the pixel inside it
+@GWOEM_FORE   db 3                      ; graphics foreground
+@GWOEM_BACK   db 0                      ;  and background
+@GWOEM_GLASTM db 0
+@GWOEM_GOK    db 0                      ; scratch for SCALXY's answer
+
+; Put up a screen.  AL is 0 for text or the SCREEN number, and this is the pair
+; GWINI does: set the hardware, then tell SCNDRV the geometry and clear.
+@GWOEM_SETMODE:
+        push    ax
+        push    bx
+        push    cx
+        mov     [cs:@GWOEM_GMODE], al
+        or      al, al
+        jnz     @@sm_graph
+        mov     byte [cs:@GWOEM_GBPP], 0
+        mov     al, 3                   ; 80 columns of text, in colour
+        cmp     word [cs:@GWOEM_VSEG], 0B000h
+        jne     @@sm_set
+        mov     al, 7                   ; ... or on the monochrome card
+        jmp     @@sm_set
+@@sm_graph:
+        mov     word [cs:@GWOEM_VSEG], 0B800h
+        cmp     al, 2
+        je      @@sm_two
+        mov     byte [cs:@GWOEM_GBPP], 2
+        mov     byte [cs:@GWOEM_GSHIFT], 2
+        mov     byte [cs:@GWOEM_GFIRST], 0C0h
+        mov     byte [cs:@GWOEM_GREP], 055h
+        mov     byte [cs:@GWOEM_GAMSK], 3
+        mov     byte [cs:@GWOEM_GLASTM], 3
+        mov     word [cs:@GWOEM_GMAXX], 319
+        mov     word [cs:@GWOEM_GASP], 213      ; five sixths, in 256ths
+        mov     byte [cs:@GWOEM_WIDTH], 40
+        mov     al, 4
+        jmp     @@sm_set
+@@sm_two:
+        mov     byte [cs:@GWOEM_GBPP], 1
+        mov     byte [cs:@GWOEM_GSHIFT], 3
+        mov     byte [cs:@GWOEM_GFIRST], 080h
+        mov     byte [cs:@GWOEM_GREP], 0FFh
+        mov     byte [cs:@GWOEM_GAMSK], 1
+        mov     byte [cs:@GWOEM_GLASTM], 1
+        mov     word [cs:@GWOEM_GMAXX], 639
+        mov     word [cs:@GWOEM_GASP], 107      ; five twelfths
+        mov     byte [cs:@GWOEM_WIDTH], 80
+        mov     al, 6
+@@sm_set:
+        cmp     byte [cs:@GWOEM_GMODE], 0
+        jne     @@sm_int
+        mov     byte [cs:@GWOEM_WIDTH], 80
+@@sm_int:
+        xor     ah, ah
+        int     10h
+        mov     al, [cs:@GWOEM_WIDTH]
+        mov     cl, [cs:@GWOEM_HEIGHT]
+        call    @SCNSWI
+        call    @CLRSCN
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+; MAPXYC - "MAP INTO A C".  The coordinate is in CX and DX, which is where
+; SCAND leaves it -- "RETURN X IN BC ... RETURN Y IN [D,E]" -- and where the
+; line code keeps it, swapping those registers with GXPOS and GYPOS as it goes.
+; GRPACX and GRPACY are the accumulator SCAND also updates, and they do not
+; follow those swaps, so they are not what this reads.
+@MAPXYC:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        push    cx                      ; the column, for once the row is done
+        mov     ax, dx
+        push    ax                      ; MUL needs DX, so keep the row here
+        shr     ax, 1
+        mov     cx, @GWOEM_GROWB
+        mul     cx                      ; the row pair, 80 bytes each
+        mov     bx, ax
+        pop     ax
+        test    al, 1
+        jz      @@mx_even
+        add     bx, @GWOEM_PLANE        ; odd rows sit in the second plane
+@@mx_even:
+        pop     ax
+        mov     dx, ax
+        mov     cl, [cs:@GWOEM_GSHIFT]
+        shr     ax, cl                  ; which byte of the row
+        add     bx, ax
+        mov     ax, 1
+        shl     ax, cl
+        dec     ax
+        and     dx, ax                  ; and which pixel of the byte
+        mov     cl, [cs:@GWOEM_GBPP]
+        dec     cl
+        mov     ax, dx
+        shl     ax, cl                  ; times the bits each one takes
+        mov     cl, al
+        mov     al, [cs:@GWOEM_GFIRST]
+        shr     al, cl
+        mov     [cs:@GWOEM_CMSK], al
+        mov     [cs:@GWOEM_CADR], bx
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+; SCALXY - "SCALE INTO BOUNDS", on the same CX and DX.  The caller reads the
+; carry as GENGRP does, "JAE PSTNOT ;NO PSET IF NOT IN BOUNDS", so carry set
+; means the point was on the screen.  Either way it is brought onto it, which
+; is what the line code wants -- DOGRPH calls this "CHEATY SCALING - JUST
+; TRUNCATE FOR NOW".
+@SCALXY:
+        push    ax
+        mov     byte [cs:@GWOEM_GOK], 1
+        mov     ax, cx
+        or      ax, ax
+        jns     @@sc_xhigh
+        xor     ax, ax
+        jmp     @@sc_xbad
+@@sc_xhigh:
+        cmp     ax, [cs:@GWOEM_GMAXX]
+        jbe     @@sc_xdone
+        mov     ax, [cs:@GWOEM_GMAXX]
+@@sc_xbad:
+        mov     byte [cs:@GWOEM_GOK], 0
+@@sc_xdone:
+        mov     cx, ax
+        mov     ax, dx
+        or      ax, ax
+        jns     @@sc_yhigh
+        xor     ax, ax
+        jmp     @@sc_ybad
+@@sc_yhigh:
+        cmp     ax, [cs:@GWOEM_GMAXY]
+        jbe     @@sc_ydone
+        mov     ax, [cs:@GWOEM_GMAXY]
+@@sc_ybad:
+        mov     byte [cs:@GWOEM_GOK], 0
+@@sc_ydone:
+        mov     dx, ax
+        pop     ax
+        cmp     byte [cs:@GWOEM_GOK], 0
+        je      @@sc_off
+        stc
+        ret
+@@sc_off:
+        clc
+        ret
+
+; SETC - put ATRBYT at the current C.  Spreading the attribute over the whole
+; byte and keeping only the masked bits saves having to know where in the byte
+; the pixel sits.
+@SETC:
+        push    ax
+        push    bx
+        push    es
+        mov     es, [cs:@GWOEM_VSEG]
+        mov     bx, [cs:@GWOEM_CADR]
+        mov     al, byte [@ATRBYT]
+        and     al, [cs:@GWOEM_GAMSK]
+        mul     byte [cs:@GWOEM_GREP]
+        mov     ah, [cs:@GWOEM_CMSK]
+        and     al, ah
+        not     ah
+        and     ah, [es:bx]
+        or      al, ah
+        mov     [es:bx], al
+        pop     es
+        pop     bx
+        pop     ax
+        ret
+
+; READC - the attribute at the current C, in AL.
+@READC:
+        push    bx
+        push    cx
+        push    es
+        mov     es, [cs:@GWOEM_VSEG]
+        mov     bx, [cs:@GWOEM_CADR]
+        mov     ah, [cs:@GWOEM_CMSK]
+        mov     al, [es:bx]
+        and     al, ah
+@@rc_down:
+        test    ah, 1                   ; slide the pixel down to bit 0
+        jnz     @@rc_done
+        shr     al, 1
+        shr     ah, 1
+        jmp     @@rc_down
+@@rc_done:
+        xor     ah, ah
+        pop     es
+        pop     cx
+        pop     bx
+        ret
+
+; STOREC, FETCHC - the current C out of and into BX and AL, which is how the
+; paint and box code carries one around.
+@STOREC:
+        mov     [cs:@GWOEM_CADR], bx
+        mov     [cs:@GWOEM_CMSK], al
+        ret
+
+@FETCHC:
+        mov     bx, [cs:@GWOEM_CADR]
+        mov     al, [cs:@GWOEM_CMSK]
+        ret
+
+; RIGHTC, LEFTC - one pixel across, into the next byte when the mask runs out.
+@RIGHTC:
+        push    ax
+        push    cx
+        mov     cl, [cs:@GWOEM_GBPP]
+        mov     al, [cs:@GWOEM_CMSK]
+        shr     al, cl
+        jnz     @@rt_done
+        mov     al, [cs:@GWOEM_GFIRST]
+        inc     word [cs:@GWOEM_CADR]
+@@rt_done:
+        mov     [cs:@GWOEM_CMSK], al
+        pop     cx
+        pop     ax
+        ret
+
+@LEFTC:
+        push    ax
+        push    cx
+        mov     cl, [cs:@GWOEM_GBPP]
+        mov     al, [cs:@GWOEM_CMSK]
+        shl     al, cl
+        jnz     @@lf_done
+        mov     al, [cs:@GWOEM_GFIRST]
+        mov     cl, 8
+        sub     cl, [cs:@GWOEM_GBPP]
+        shr     al, cl                  ; the rightmost pixel of a byte
+        dec     word [cs:@GWOEM_CADR]
+@@lf_done:
+        mov     [cs:@GWOEM_CMSK], al
+        pop     cx
+        pop     ax
+        ret
+
+; DOWNC, UPC - one row.  The planes alternate, so a row down from an even row
+; is the same offset in the other plane, and from an odd row it is the next
+; row of this one.
+@DOWNC:
+        push    ax
+        mov     ax, [cs:@GWOEM_CADR]
+        test    ah, @GWOEM_PLANE / 256
+        jnz     @@dn_odd
+        add     ax, @GWOEM_PLANE
+        jmp     @@dn_done
+@@dn_odd:
+        sub     ax, @GWOEM_PLANE - @GWOEM_GROWB
+@@dn_done:
+        mov     [cs:@GWOEM_CADR], ax
+        pop     ax
+        ret
+
+@UPC:
+        push    ax
+        mov     ax, [cs:@GWOEM_CADR]
+        test    ah, @GWOEM_PLANE / 256
+        jz      @@up_even
+        sub     ax, @GWOEM_PLANE
+        jmp     @@up_done
+@@up_even:
+        add     ax, @GWOEM_PLANE - @GWOEM_GROWB
+@@up_done:
+        mov     [cs:@GWOEM_CADR], ax
+        pop     ax
+        ret
+
+; TUPC, TDOWNC - PAINT's "SEE IF AT BOTTOM & MOVE DOWN IF NOT", and the same
+; upwards; carry set means the edge was reached and nothing moved.
+@TDOWNC:
+        push    ax
+        mov     ax, [cs:@GWOEM_CADR]
+        test    ah, @GWOEM_PLANE / 256
+        jz      @@td_ok                 ; an even row always has one below it
+        sub     ax, @GWOEM_PLANE - @GWOEM_GROWB
+        cmp     ax, @GWOEM_GPLANE
+        jb      @@td_ok
+        pop     ax
+        stc
+        ret
+@@td_ok:
+        pop     ax
+        call    @DOWNC
+        clc
+        ret
+
+@TUPC:
+        push    ax
+        mov     ax, [cs:@GWOEM_CADR]
+        test    ah, @GWOEM_PLANE / 256
+        jnz     @@tu_ok                 ; an odd row always has one above it
+        cmp     ax, @GWOEM_GROWB
+        jae     @@tu_ok
+        pop     ax
+        stc
+        ret
+@@tu_ok:
+        pop     ax
+        call    @UPC
+        clc
+        ret
+
+; NSETCX - "NSETCX WITH COUNT IN [H,L] OF POINTS TO SETC", rightwards.
+@NSETCX:
+        push    cx
+        mov     cx, bx
+        jcxz    @@nx_done
+@@nx_loop:
+        call    @SETC
+        call    @RIGHTC
+        loop    @@nx_loop
+@@nx_done:
+        pop     cx
+        ret
+
+; PIXSIZ - GENGRP: "CALL PIXSIZ ;Test for graphics capability / OR AL,AL /
+; JNZ ... / JMP FCERR ;Graphics not available".  Zero while the text screen is
+; up, which is what keeps the graphics statements out of it.
+@PIXSIZ:
+        mov     al, [cs:@GWOEM_GBPP]
+        ret
+
+; GRPSIZ - GRPINI halves what comes back to centre the graphics cursor, so
+; these are the largest coordinates, not the counts.
+@GRPSIZ:
+        mov     cx, [cs:@GWOEM_GMAXX]
+        mov     dx, [cs:@GWOEM_GMAXY]
+        ret
+
+; GTASPC - the aspect ratio for CIRCLE and DRAW, as a fraction of 256 in BX
+; with its inverse in DX.  ADVGRP tests "IS ASPECT RATIO GREATER THAN ONE" by
+; looking at BH, and both screens here are wider than they are tall.
+@GTASPC:
+        mov     bx, [cs:@GWOEM_GASP]
+        mov     dx, 65535
+        or      bx, bx
+        jz      @@ga_done
+        push    ax
+        push    cx
+        mov     dx, 1
+        xor     ax, ax                  ; 65536 / aspect
+        div     bx
+        mov     dx, ax
+        pop     cx
+        pop     ax
+@@ga_done:
+        ret
+
+; ---------------------------------------------------------------------------
+; Colours.
+
+; SETATR - GENGRP: "CALL SETATR ;SET THE ATTRIBUTE AS THE CURRENT ONE / JAE ..
+; / JMP FCERR ;ILLEGAL ATTRIBUTES GIVE FUNCTION CALL".
+@SETATR:
+        cmp     byte [cs:@GWOEM_GMODE], 0
+        jne     @@sa_graph
+        cmp     al, 16
+        jae     @@sa_bad
+        clc
+        ret
+@@sa_graph:
+        push    bx
+        mov     bl, [cs:@GWOEM_GAMSK]
+        cmp     al, bl
+        pop     bx
+        ja      @@sa_bad
+        clc
+        ret
+@@sa_bad:
+        stc
+        ret
+
+; GETFBC, SETFBC - the foreground in AL and the background in BL.  Carry on
+; entry to GETFBC asks for the graphics pair; GWSTS's XFGBG reverses the
+; soft-key line with "CLC / CALL GETFBC / XCHG AX,BX / CALL SETFBC".
+@GETFBC:
+        jc      @@gf_graph
+        cmp     byte [cs:@GWOEM_GMODE], 0
+        jne     @@gf_graph
+        push    cx
+        mov     al, [cs:@GWOEM_ATTR]
+        mov     bl, al
+        and     al, 0Fh
+        mov     cl, 4
+        shr     bl, cl
+        and     bl, 7
+        pop     cx
+        ret
+@@gf_graph:
+        mov     al, [cs:@GWOEM_FORE]
+        mov     bl, [cs:@GWOEM_BACK]
+        ret
+
+@SETFBC:
+        cmp     byte [cs:@GWOEM_GMODE], 0
+        jne     @@sf_graph
+        push    ax
+        push    cx
+        and     al, 0Fh
+        mov     ah, bl
+        and     ah, 7
+        mov     cl, 4
+        shl     ah, cl
+        or      al, ah
+        mov     [cs:@GWOEM_ATTR], al
+        pop     cx
+        pop     ax
+        ret
+@@sf_graph:
+        mov     [cs:@GWOEM_FORE], al
+        mov     [cs:@GWOEM_BACK], bl
+        ret
+
+; SETCLR - the COLOR statement.  BX points at the list GTPRMS built, the same
+; shape SCRSTT reads, and carry says the colours were refused.  On the text
+; screen that is foreground, background and a border this layer has nowhere to
+; put; on SCREEN 1 it is the background and the palette, both of which the BIOS
+; sets; SCREEN 2 has two fixed colours and takes none of it.
+@SETCLR:
+        push    ax
+        push    bx
+        push    cx
+        push    si
+        mov     si, bx
+        mov     cl, [si]
+        xor     ch, ch
+        inc     si
+        or      cx, cx
+        jnz     @@cl_n1
+        jmp     @@cl_ok
+@@cl_n1:
+        cmp     byte [cs:@GWOEM_GMODE], 2
+        je      @@cl_bad
+        cmp     byte [cs:@GWOEM_GMODE], 1
+        je      @@cl_graph
+        cmp     byte [si], 0
+        je      @@cl_back
+        mov     al, [si+1]
+        cmp     al, 32
+        jae     @@cl_bad
+        and     al, 0Fh
+        mov     bl, [cs:@GWOEM_ATTR]
+        and     bl, 0F0h
+        or      al, bl
+        mov     [cs:@GWOEM_ATTR], al
+@@cl_back:
+        add     si, 2
+        dec     cx
+        or      cx, cx
+        jnz     @@cl_n2
+        jmp     @@cl_ok
+@@cl_n2:
+        cmp     byte [si], 0
+        je      @@cl_ok
+        mov     al, [si+1]
+        cmp     al, 8
+        jae     @@cl_bad
+        mov     cl, 4
+        shl     al, cl
+        mov     bl, [cs:@GWOEM_ATTR]
+        and     bl, 0Fh
+        or      al, bl
+        mov     [cs:@GWOEM_ATTR], al
+        jmp     @@cl_ok
+@@cl_graph:
+        cmp     byte [si], 0
+        je      @@cl_pal
+        mov     al, [si+1]
+        cmp     al, 16
+        jae     @@cl_bad
+        mov     [cs:@GWOEM_BACK], al
+        mov     bl, al
+        xor     bh, bh                  ; the background, and the border with it
+        mov     ah, 0Bh
+        int     10h
+@@cl_pal:
+        add     si, 2
+        dec     cx
+        or      cx, cx
+        jnz     @@cl_n3
+        jmp     @@cl_ok
+@@cl_n3:
+        cmp     byte [si], 0
+        je      @@cl_ok
+        mov     al, [si+1]
+        and     al, 1
+        mov     bl, al
+        mov     bh, 1                   ; which of the two palettes
+        mov     ah, 0Bh
+        int     10h
+@@cl_ok:
+        pop     si
+        pop     cx
+        pop     bx
+        pop     ax
+        clc
+        ret
+@@cl_bad:
+        pop     si
+        pop     cx
+        pop     bx
+        pop     ax
+        stc
+        ret
+
+; SCRATR - GWSTS: "MOV BX,CX ;Call SCRATR with AX=X,BX=Y / CALL SCRATR ;Get
+; screen attributes", the answer going to MAKINT in BX.  A graphics screen
+; keeps no attribute per cell, so it reports none.
+@SCRATR:
+        push    ax
+        push    cx
+        push    dx
+        push    di
+        push    es
+        mov     dh, al
+        mov     dl, bl
+        xor     bx, bx
+        cmp     byte [cs:@GWOEM_GMODE], 0
+        jne     @@at_done
+        call    @GWOEM_VIDPOS
+        mov     al, [es:di+1]
+        xor     ah, ah
+        mov     bx, ax
+@@at_done:
+        pop     es
+        pop     di
+        pop     dx
+        pop     cx
+        pop     ax
+        ret
+
+; CSRATR - the cursor shape LOCATE may ask for.  The BIOS already gives this
+; layer the shape it wants through CSRDSP, so the request is accepted and the
+; shape left as it is.
+@CSRATR:
+        clc
+        ret
+
+; ---------------------------------------------------------------------------
+; Text on a graphics screen.  The characters are drawn from the font the BIOS
+; carries, so these hand them to it rather than writing cells of their own.
+
+@GWOEM_BPOS:                            ; DH column, DL row, both 1-based
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        mov     cl, dl
+        mov     dl, dh
+        mov     dh, cl
+        dec     dh
+        dec     dl
+        xor     bh, bh
+        mov     ah, 2
+        int     10h
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+@GWOEM_GSCROUT:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        push    ax
+        call    @GWOEM_BPOS
+        pop     ax
+        xor     bh, bh
+        mov     bl, [cs:@GWOEM_FORE]
+        mov     cx, 1
+        mov     ah, 9
+        int     10h
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        clc
+        ret
+
+@GWOEM_GSCRINP:
+        push    bx
+        push    cx
+        push    dx
+        call    @GWOEM_BPOS
+        xor     bh, bh
+        mov     ah, 8
+        int     10h
+        xor     ah, ah
+        pop     dx
+        pop     cx
+        pop     bx
+        ret
+
+@GWOEM_GCLREOL:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        call    @GWOEM_BPOS
+        mov     cl, [cs:@GWOEM_WIDTH]
+        sub     cl, dh
+        inc     cl
+        xor     ch, ch
+        mov     al, " "
+        xor     bh, bh
+        mov     bl, [cs:@GWOEM_FORE]
+        mov     ah, 9
+        int     10h
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+@GWOEM_GCLRSCN:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        mov     ax, 0600h               ; blank the whole window
+        xor     bh, bh
+        xor     cx, cx
+        mov     dh, [cs:@GWOEM_HEIGHT]
+        dec     dh
+        mov     dl, [cs:@GWOEM_WIDTH]
+        dec     dl
+        int     10h
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+; A scroll of the text window moves pixels, not characters: reading a cell back
+; with the BIOS only returns a character when the pixels under it still form
+; one, so copying a graphics screen cell by cell erases it.  A plain vertical
+; move of a block is what the BIOS scroll does, so it does it; anything else
+; falls back to the copy below, which is only ever reached while editing.
+@GWOEM_GSCROLL:
+        cmp     ah, bh                  ; the same columns ...
+        jne     @@gl_no
+        cmp     al, bl                  ; ... and a different row?
+        je      @@gl_no
+        or      cl, cl
+        jz      @@gl_no
+        or      ch, ch
+        jz      @@gl_no
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        mov     dl, ah
+        dec     dl
+        mov     [cs:@GWOEM_GLLFT], dl
+        add     dl, ch
+        dec     dl
+        mov     [cs:@GWOEM_GLRGT], dl
+        cmp     al, bl
+        jb      @@gl_down
+        mov     dl, al                  ; up: the destination is the top
+        sub     dl, bl
+        mov     [cs:@GWOEM_GLN], dl
+        mov     byte [cs:@GWOEM_GLFN], 6
+        mov     dl, bl
+        mov     dh, al
+        jmp     @@gl_rows
+@@gl_down:
+        mov     dl, bl                  ; down: the source is
+        sub     dl, al
+        mov     [cs:@GWOEM_GLN], dl
+        mov     byte [cs:@GWOEM_GLFN], 7
+        mov     dl, al
+        mov     dh, bl
+@@gl_rows:
+        dec     dl
+        mov     [cs:@GWOEM_GLTOP], dl
+        add     dh, cl
+        dec     dh
+        dec     dh
+        mov     [cs:@GWOEM_GLBOT], dh
+        mov     ah, [cs:@GWOEM_GLFN]
+        mov     al, [cs:@GWOEM_GLN]
+        xor     bh, bh                  ; the uncovered lines go black
+        mov     ch, [cs:@GWOEM_GLTOP]
+        mov     cl, [cs:@GWOEM_GLLFT]
+        mov     dh, [cs:@GWOEM_GLBOT]
+        mov     dl, [cs:@GWOEM_GLRGT]
+        int     10h
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        clc
+        ret
+@@gl_no:
+        stc
+        ret
+
+@GWOEM_GLTOP  db 0
+@GWOEM_GLBOT  db 0
+@GWOEM_GLLFT  db 0
+@GWOEM_GLRGT  db 0
+@GWOEM_GLN    db 0
+@GWOEM_GLFN   db 0
+
+; One row of a block move, cell by cell through the BIOS, in whichever
+; direction keeps an overlap from eating itself.
+@GWOEM_GSCROW:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        mov     [cs:@GWOEM_SROW], al
+        mov     [cs:@GWOEM_SCOL], ah
+        mov     [cs:@GWOEM_DROW], bl
+        mov     [cs:@GWOEM_DCOL], bh
+        mov     byte [cs:@GWOEM_STEP], 1
+        mov     cl, ch
+        xor     ch, ch
+        jcxz    @@gw_done
+        cmp     bh, ah
+        jbe     @@gw_loop
+        mov     byte [cs:@GWOEM_STEP], -1
+        mov     al, cl
+        dec     al
+        add     [cs:@GWOEM_SCOL], al
+        add     [cs:@GWOEM_DCOL], al
+@@gw_loop:
+        mov     dh, [cs:@GWOEM_SCOL]
+        mov     dl, [cs:@GWOEM_SROW]
+        call    @GWOEM_GSCRINP
+        mov     dh, [cs:@GWOEM_DCOL]
+        mov     dl, [cs:@GWOEM_DROW]
+        call    @GWOEM_GSCROUT
+        mov     al, [cs:@GWOEM_STEP]
+        add     [cs:@GWOEM_SCOL], al
+        add     [cs:@GWOEM_DCOL], al
+        loop    @@gw_loop
+@@gw_done:
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+@GWOEM_SROW   db 0
+@GWOEM_SCOL   db 0
+@GWOEM_DROW   db 0
+@GWOEM_DCOL   db 0
+@GWOEM_STEP   db 0
+
+
+; ---------------------------------------------------------------------------
+; PAINT.  ADVGRP keeps a queue of runs still to be looked at and walks the
+; region a scan line at a time; these three do the work on the line itself.
+
+@GWOEM_PBORD  db 0                      ; the attribute the scan stops at
+@GWOEM_PCNT   dw 0                      ; points painted by this scan
+@GWOEM_PSKIP  dw 0                      ; how much of the run is left
+@GWOEM_PNEW   db 0                      ; whether any of it was new ground
+
+; The byte column of the current C, 0 to 79, which is how the edges of a row
+; are recognised from an address that carries no coordinates.
+@GWOEM_GCOL:
+        mov     ax, [cs:@GWOEM_CADR]
+        and     ax, 0FFFFh - @GWOEM_PLANE
+        xor     dx, dx
+        mov     bx, @GWOEM_GROWB
+        div     bx
+        mov     ax, dx
+        ret
+
+; Carry set when the current C is the last pixel of its row, or the first.
+@GWOEM_GATRT:
+        push    ax
+        push    bx
+        push    dx
+        mov     al, [cs:@GWOEM_CMSK]
+        cmp     al, [cs:@GWOEM_GLASTM]
+        jne     @@rt_no
+        call    @GWOEM_GCOL
+        cmp     ax, @GWOEM_GROWB - 1
+        jne     @@rt_no
+        pop     dx
+        pop     bx
+        pop     ax
+        stc
+        ret
+@@rt_no:
+        pop     dx
+        pop     bx
+        pop     ax
+        clc
+        ret
+
+@GWOEM_GATLF:
+        push    ax
+        push    bx
+        push    dx
+        mov     al, [cs:@GWOEM_CMSK]
+        cmp     al, [cs:@GWOEM_GFIRST]
+        jne     @@lf_no
+        call    @GWOEM_GCOL
+        or      ax, ax
+        jnz     @@lf_no
+        pop     dx
+        pop     bx
+        pop     ax
+        stc
+        ret
+@@lf_no:
+        pop     dx
+        pop     bx
+        pop     ax
+        clc
+        ret
+
+; PNTINI - "INIT PAINT STUFF & CHECK BORDER ATTRIB", the border in AL, carry
+; if it is not a colour this screen has.
+; PAINT is refused.  SCANR and SCANL below fill a convex region correctly, but
+; the queue they feed is driven by counts -- SKPCNT against MOVCNT, and the
+; overhang entries either side -- whose exact meaning the call sites do not
+; pin down, and a reconstruction that is close but not right either walks out
+; of a shape whose outline is solid and floods the screen, or stops a few lines
+; in and leaves a band.  Refusing says so; filling half a circle would not.
+@PNTINI:
+        stc
+        ret
+
+@GWOEM_PNTINI:
+        push    bx
+        mov     bl, [cs:@GWOEM_GAMSK]
+        cmp     al, bl
+        pop     bx
+        ja      @@pi_bad
+        mov     [cs:@GWOEM_PBORD], al
+        clc
+        ret
+@@pi_bad:
+        stc
+        ret
+
+; SCANR - "PERFORM LOW LEVEL RIGHT SCAN".  DX arrives as SKPCNT, the length of
+; the run above or below that this line has to account for: border points are
+; stepped over while that lasts, then everything up to the next border point is
+; painted.  Back come DX as what is left of the run, BX as the number painted,
+; CL as whether any of it was new, and CSAVEA/CSAVEM as the point it started
+; from -- SCANL1 puts the C back there before scanning the other way.
+@SCANR:
+        push    ax
+        call    @FETCHC
+        mov     [@CSAVEA], bx
+        mov     byte [@CSAVEM], al
+        mov     [cs:@GWOEM_PSKIP], dx
+        mov     word [cs:@GWOEM_PCNT], 0
+        mov     byte [cs:@GWOEM_PNEW], 0
+; Starting on the border means this line has nothing to paint: say so, and the
+; caller takes the next entry off the queue.  Stepping over the border instead,
+; to look for more of the run beyond it, is what the skip count is for -- but a
+; scan that goes looking that way runs out the far side of a shape whose line
+; is solid, and paints the rest of the screen.  Lines split by an obstacle are
+; the cost of not doing it.
+@@rs_paint:
+        call    @READC
+        cmp     al, [cs:@GWOEM_PBORD]
+        je      @@rs_done
+        cmp     al, byte [@ATRBYT]
+        je      @@rs_old
+        mov     byte [cs:@GWOEM_PNEW], 1
+@@rs_old:
+        call    @SETC
+        inc     word [cs:@GWOEM_PCNT]
+        call    @GWOEM_GATRT
+        jc      @@rs_done
+        call    @RIGHTC
+        jmp     @@rs_paint
+@@rs_done:
+        mov     bx, [cs:@GWOEM_PCNT]
+        mov     dx, [cs:@GWOEM_PSKIP]
+        mov     cl, [cs:@GWOEM_PNEW]
+        pop     ax
+        ret
+
+; SCANL - the same leftwards, from the point the line started at.  That point
+; has already been painted, so this steps first and stops on the border rather
+; than at it, leaving the C on the last point it painted.
+@SCANL:
+        push    ax
+        mov     word [cs:@GWOEM_PCNT], 0
+        mov     byte [cs:@GWOEM_PNEW], 0
+@@ls_loop:
+        call    @GWOEM_GATLF
+        jc      @@ls_done
+        call    @LEFTC
+        call    @READC
+        cmp     al, [cs:@GWOEM_PBORD]
+        je      @@ls_back
+        cmp     al, byte [@ATRBYT]
+        je      @@ls_old
+        mov     byte [cs:@GWOEM_PNEW], 1
+@@ls_old:
+        call    @SETC
+        inc     word [cs:@GWOEM_PCNT]
+        jmp     @@ls_loop
+@@ls_back:
+        call    @RIGHTC
+@@ls_done:
+        mov     bx, [cs:@GWOEM_PCNT]
+        mov     cl, [cs:@GWOEM_PNEW]
+        pop     ax
+        ret
+
+; ---------------------------------------------------------------------------
 ; The rest of the OEM layer, which this text-mode reconstruction does not
 ; implement.  SCRSTT refuses every screen mode, so the graphics primitives are
 ; unreachable; the sound, light pen, joystick and serial entry points return
 ; without doing anything.
 
-; PIXSIZ - GENGRP: "CALL PIXSIZ ;Test for graphics capability / OR AL,AL /
-; JNZ ... / JMP FCERR ;Graphics not available".  Zero is the answer here, and
-; it has to be said explicitly: left to chance, whatever happened to be in AL
-; let PSET and DRAW through while LINE, CIRCLE and PAINT were refused.
-@PIXSIZ:
-        xor     al, al
-        ret
-
-@SETC:
-@READC:
-@STOREC:
-@FETCHC:
-@MAPXYC:
-@SCALXY:
-@SCANL:
-@SCANR:
-@UPC:
-@DOWNC:
-@LEFTC:
-@RIGHTC:
-@TUPC:
-@TDOWNC:
 @NREAD:
 @NWRITE:
-@NSETCX:
-@GRPSIZ:
-@GTASPC:
 @PGINIT:
-@PNTINI:
-@SETATR:
-@SETCLR:
-@SETFBC:
-@GETFBC:
-@SCRATR:
-@CSRATR:
 @POLLEV:
 @RDPEN:
 @RDSTIK:
