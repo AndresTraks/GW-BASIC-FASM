@@ -200,7 +200,9 @@ if os.path.exists(OEMSRC):
 
 OEM = [n for n in oem_missing() if n not in provided]
 order = [f for _, fs in units.units(orig) for f in fs]
-if os.path.exists(OEMSRC): order.append("GWOEM.ASM")
+# GWOEM holds resident drivers, so it goes before the discardable tail.
+if os.path.exists(OEMSRC):
+    order.insert(order.index(units.TAIL[0] + ".ASM"), "GWOEM.ASM")
 alltext = "\n".join(io.open(os.path.join(SRC, f), encoding="latin-1").read() for f in order)
 alltext += "\n".join(io.open(os.path.join(SRC, h), encoding="latin-1").read() for h in HEADERS)
 # MASM lets "X=X+1" run before any plain "X=", so a counter that accumulates
@@ -235,8 +237,12 @@ io.open(os.path.join(SRC, "GWBASIC.ASM"), "w", encoding="latin-1").write(
     "; modules are INCLUDEd here in link order rather than assembled separately:\n"
     "; GWDATA first, because it opens the code segment at offset 0 with BEGCSG\n"
     "; and does the \"ORG 400O\" that leaves room for the OS control block, with\n"
-    "; START right after; BIBOOT last, because it is the entry point and its own\n"
-    "; comment says it \"is included in the linker file list AFTER all others\".\n"
+    "; START right after.\n"
+    ";\n"
+    "; ITSA86, GWINIT and BIBOOT last, in that order, because MAPINI moves the\n"
+    "; data segment on top of everything that follows ITSA86's CSEND -- that is\n"
+    "; how GW-BASIC reclaims the memory its initialisation code occupies -- so\n"
+    "; only initialisation code may be linked there.  See scripts/units.py.\n"
     ";\n"
     "; The image is one flat CSEG followed by DSEG.  GWINIT derives DS from CS at\n"
     "; run time (DS = CS + offset(BEGDSG)/16), so both have to live in one 64K\n"

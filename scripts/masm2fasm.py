@@ -373,9 +373,26 @@ for line in t.split("\n"):
     b = re.sub(r"(?i)\bDUP\s*\(", "dup (", b)
     b = re.sub(r"(?i)\b(DB|DW|DD)([\x01\"'])", lambda m: m.group(1) + " " + m.group(2), b)
     if not re.match(r"(?i)^\s*INS86\b", b): b = re.sub(NUMRE, lambda m: num(m.group(0)), b)
-    b = re.sub(r"(?i)^(\s*(?:[A-Za-z_$?@][\w$?@]*:)?\s*)XLAT\s+.*$", lambda m: m.group(1) + "xlatb", b)
-    b = re.sub(r"(?i)^(\s*(?:[A-Za-z_$?@][\w$?@]*:)?\s*)(LODS|STOS|SCAS|MOVS|CMPS)\s+(.*)$",
-               lambda m: m.group(1) + m.group(2).lower() + ("b" if re.search(r"(?i)\bbyte\b", m.group(3)) else "w"), b)
+    # XLAT and the string instructions take an operand only to name a segment:
+    # the address is fixed (BX, or SI and DI), and MASM emits the override that
+    # the operand's segment implies.  A CSEG operand therefore means CS:, which
+    # fasm expresses by writing the operand out.  See mkcsdata.py.
+    def _seg(m):
+        pre, op, rest = m.group(1), m.group(2).upper(), m.group(3)
+        names = [n for n in re.findall(r"[A-Za-z_$?@][\w$?@]*", rest)
+                 if n.upper() not in ("BYTE", "WORD", "DWORD", "PTR")]
+        sz = "byte" if re.search(r"(?i)\bbyte\b", rest) else "word"
+        suffix = "b" if sz == "byte" else "w"
+        # LODS, MOVS and CMPS read DS:SI, so only those can be overridden;
+        # STOS and SCAS are ES:DI and have no segment to choose.
+        if names and names[-1].upper() in CSDATA and op in ("XLAT", "LODS", "MOVS", "CMPS"):
+            if op == "XLAT": return pre + "xlat byte [cs:bx]"
+            if op == "LODS": return pre + "lods %s [cs:si]" % sz
+            if op == "MOVS": return pre + "movs %s [es:di], %s [cs:si]" % (sz, sz)
+            return pre + "cmps %s [cs:si], %s [es:di]" % (sz, sz)
+        return pre + ("xlatb" if op == "XLAT" else op.lower() + suffix)
+    b = re.sub(r"(?i)^(\s*(?:[A-Za-z_$?@][\w$?@]*:)?\s*)(XLAT|LODS|STOS|SCAS|MOVS|CMPS)\s+(.*)$",
+               _seg, b)
 
     m = re.match(r"^(\s*(?:[A-Za-z_$?@][\w$?@]*:)?\s*)([A-Za-z_$?@][\w$?@]*)(\s+)(.*)$", b)
     if m and m.group(2).upper() in MACROS:                       # macro call

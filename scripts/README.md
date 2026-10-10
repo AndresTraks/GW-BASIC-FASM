@@ -32,7 +32,7 @@ python3 make.py --check      # also assemble every module separately first
 That regenerates the converted sources and the two generated files,
 `GWBASIC.ASM` and `GWSTUB.INC`, then runs every check.
 
-**The image links but does not run.** See [Status](#status).
+**The image runs.** See [Status](#status).
 
 Regenerating requires Python 3. It uses the same vendored fasm as
 `assemble.sh`, and `objdump` (binutils) for the `INS86` check, which skips
@@ -45,11 +45,12 @@ Two files in the repository root are generated and should not be edited by hand:
 - **`GWBASIC.ASM`** — the master. Includes `GWSTUB.INC` and then every module in
   link order: `GWDATA` first, because it opens the code segment at offset 0 with
   `BEGCSG` and does the `ORG 400O` that leaves room for the OS control block,
-  with `START` right after; `BIBOOT` last, because it is the entry point and its
-  own comment says it "is included in the linker file list AFTER all others".
-- **`GWSTUB.INC`** — the 66 OEM symbols stubbed to 0, and the assembly-time
-  counters seeded to 0 because MASM allows a counter to be read before its first
-  assignment.
+  with `START` right after; then `ITSA86`, `GWINIT` and `BIBOOT` last, in that
+  order, because everything after `ITSA86`'s `CSEND` is overlaid at run time —
+  see [The discardable tail](#the-discardable-tail).
+- **`GWSTUB.INC`** — now only the nine self-referential assembly-time counters,
+  seeded because MASM allows a counter to be read before its first assignment.
+  There are no OEM stubs left: `GWOEM.ASM` defines them all.
 
 Each converted module is `INCLUDE`d **twice**, and its code and data regions are
 guarded by `if @GW_PASS = 1` and `if @GW_PASS = 2`. The reason is that fasm
@@ -147,13 +148,40 @@ be careful." The trick is that `BEGDSG` is deliberately declared `EXTRN :NEAR`
 in `GWINIT` although it lives in the data segment, so the same symbol resolves
 to 0 in DSEG's frame and to the CSEG→DSEG distance in CSEG's.
 
-Measured sizes confirm it all fits one segment:
+It all fits one segment with room to spare — roughly 44.7K of code and tables
+plus 2157 bytes (`0x086D`) of variables, leaving about 18K of the 64K segment
+free. `link.py` prints the exact figures for the current sources.
+
+### The discardable tail
+
+The link order is not free, and getting it wrong destroys the program at run
+time. `ITSA86` carries the label `CSEND`, with the comment "All code loaded
+after this label is resident only until routine `MAPINI` initializes the new
+memory map". `MAPCLC` computes
 
 ```
-CSEG  code+tables   0x0100 .. 0xADA0    44190 bytes
-DSEG  variables     0x0000 .. 0x086D     2157 bytes
-top of DSEG from CS:0 = 0xB60D           headroom in 64K: 18931 bytes
+NEWDS = CS + paragraphs(CSEND) + COM buffer paragraphs
 ```
+
+and `MAPINI` then moves the data segment there, **deliberately overlaying
+everything linked after `CSEND`** so that the memory the initialisation code
+occupied is reclaimed. Only initialisation code may follow it.
+
+Three units qualify, and nothing else does. `ITSA86`'s own tail past `CSEND` is
+`MAPCLC` and `SEGOFF`, both called only from `GWINIT`. `GWINIT`'s only entry
+points are `INIT` and `CMDERR`, both startup-only; it also ends with
+`$LAST=$ / LASTWR=$`, which is a link-map marker for the end of the image, so
+this is the original order too. `BIBOOT` is the `.EXE` entry point, which a
+`.COM` image never uses — its own comment says it "is included in the linker
+file list AFTER all others" — and it stays last of the three because `LSTVAR`,
+which BASIC reads as the end of its data segment, is the last label in its
+DSEG. `GWOEM` goes *before* `ITSA86`, because the drivers are resident.
+
+With the modules in plain alphabetical order, `CSEND` fell in the middle of the
+image and `MAPINI` wrote the data segment over 14K of live code — `MATH1`,
+`MATH2`, `SCNDRV` and `GWOEM` among it. That was the hang after the sign-on
+banner: the "Bytes free" message is printed from `MAPINI` itself, so the number
+formatting ran through bytes that had just been overwritten.
 
 `MATH1` and `MATH2` are one translation unit, not two: `MATH2` has no `EXTRN`,
 no segment header and no `.RADIX`, starts mid-routine, references `$DP06` which
@@ -257,9 +285,35 @@ per-module attribution when a change breaks something.
 
 ## Status
 
-All 35 files convert and assemble, the whole program links as one unit, and
-**every symbol now resolves — there are no stubs left**. The image loads under
-MS-DOS 1.25 and starts executing. It does **not** yet reach the `Ok` prompt.
+All 35 files convert and assemble, the whole program links as one unit, every
+symbol resolves with no stubs left, and **the interpreter runs**. Booted from an
+MS-DOS 1.25 floppy under QEMU:
+
+```
+GW-BASIC
+(C) Copyright Microsoft 1982
+62845 Bytes free
+Ok
+RUN
+ 1  3  4  5  9  7  16  9  25  11
+SUB
+Ok
+```
+
+Exercised and correct: integer and floating-point arithmetic, `SQR` `ATN` `^`,
+`LEFT$` `MID$` `LEN` `ASC` `CHR$` `STR$` `VAL` and concatenation, `PRINT`
+with both separators, `PRINT USING`, `DIM` and arrays, `FOR`/`NEXT`, `DEF FN`,
+`GOSUB`/`RETURN`, `LIST`, `RUN`, `END`, multi-statement lines, the screen
+editor and scrolling.
+
+Two things are untested rather than known-good: `IF`/`THEN`/`ELSE`, and disk
+`SAVE`/`LOAD`, which is the whole of `GIODSK` and the FCB-based DOS calls.
+
+One number cannot be confirmed here. `PRINT 1/3` gives `.3333334`.
+`PRINT .3333333` round-trips exactly, and `PRINT 1/3-.3333333` is
+`2.980232E-08` — exactly one ulp — so `FOUT` is rendering faithfully what the
+divide produced; whether the retail binary's single-precision divide lands on
+the other side of that boundary is not something this repository can answer.
 
 ### The OEM layer
 
@@ -283,6 +337,36 @@ column, both 1-based.
 Implemented: `SCROUT` `SCRINP` `CLREOL` `CLRSCN` `SCROLL` `CSRDSP` `SWIDTH`
 `PRTMAP` `EDTMAP` `KEYINP` `SNDLPT` `GWINI` `GETHED` `GWTERM` `SEGINI` `SETCBF`
 `PEKFLT` `POKFLT`.
+
+Three of those contracts took finding, and all three are cases where the
+sources say what is needed if you look in the right place.
+
+- **The keyboard has to come from DOS, not from `INT 16h`.** MS-DOS 1.25's
+  IO.SYS takes over `INT 9` and queues scan codes itself, so the BIOS buffer at
+  `40:1A` stays permanently empty and `INT 16h` never reports a key — the
+  interpreter polled forever and nothing could be typed. `MSDOSU` declares
+  exactly two console/printer calls, `C_DCIO=6 ;Direct console I/O` and
+  `C_PRTO=5 ;Printer output`, which is why they are declared: `KEYINP` uses
+  `INT 21h AH=06` with `DL=0FFh`, and `SNDLPT` uses `AH=05`. `POLKEY`'s own test
+  of `MSDCCF`, "MSDOS Ctl-C Interrupt flag", says the same thing.
+- **`GWINI` must call `SCNSWI`, and `CLRSCN` must call `SCNCLR`.** Both are
+  `PUBLIC` in `SCNDRV` and called from nowhere in GW-BASIC, so the OEM layer is
+  the only thing that can call them. `SCNSWI` ("Set CRT physical line width ...
+  on entry: AL=width, CL=height") sets `LINLEN` as well as `CRTWID` and reserves
+  the last line for the function-key display with `DEC CL ; Reserve status
+  line`. `SCNCLR` runs `TTBINI` over the line terminator table, homes both
+  cursors and refreshes the soft-key line. That one matters: `LINTTB` is
+  uninitialised storage and a zero entry reads as a `TRMWRP` terminator, so
+  until `TTBINI` has run every physical line looks like a continuation of the
+  one above it, and the first ENTER sent the cursor to the bottom of the screen.
+- **`CHR$(255)` is a function, not a character.** `GWMAIN` prints it after the
+  `Ok` prompt — `MOV AL,LOW 377O / CALL OUTDO ;FLAG AS NOT USER INPUT` — and
+  `BIMISC` after a listed line; `CTLNMK` answers it by setting `TRMNUL` on that
+  line's terminator so ENTER on it does not resubmit it. `PRTMAP` therefore
+  reports 255 with `AH=255` alongside the control codes and DEL. The byte still
+  reaches the screen, because the 1983 source has the suppressing `STC`
+  commented out — but glyph 255 in the IBM character ROM is blank, so on real
+  hardware nothing shows.
 
 Deliberately not implemented, and returning harmlessly: the CGA pixel
 primitives, colour and attribute handling, sound, the light pen, the joysticks
@@ -308,33 +392,23 @@ destroyed", so it sets `DS` itself. `GWINIT` follows the call with
 captures the new segment instead of the program segment prefix. That corrupts
 the exit vector, not the startup.
 
-### Where it stops
+`GETHED` also clears `KEYSW`. `GWINIT` sets it to 255 just before calling
+`GETHED` — "if heading is printed, display Fn keys also" — and then calls
+`SKEYON`, which walks the ten soft keys through the unimplemented `FKYFMT` and
+`FKYADV`, leaving the half-drawn `"LPT1:"` that F6 defaults to at the bottom of
+the screen. Declining the display is the honest answer while those are stubs.
 
-Booted from an MS-DOS 1.25 floppy under QEMU, `GWBASIC` loads, initialises, and
-prints its sign-on banner, correctly laid out on two lines:
-
-```
-GW-BASIC
-(C) Copyright Microsoft 1982
-```
-
-So the whole startup path works, characters reach the screen through `OUTDO`,
-the device dispatch, `SCNDRV` and `SCROUT`, and the control-character
-dispatch through `FUNTAB` handles carriage return and linefeed.
-
-It does not reach the `Ok` prompt: after the banner it hangs. The soft-key
-display was ruled out — `SKEYON` walks the ten function keys through `FKYFMT`
-and `FKYADV`, which are not implemented here, and the half-drawn `"LPT1:"` (F6's
-default assignment) used to appear at the bottom of the screen. `GETHED` now
-clears `KEYSW` to decline that display, which removes the artifact but not the
-hang, so the remaining fault is after `KEYSOF`, on the way into or inside the
-main loop at `INITSA`.
+### Debugging it
 
 Setting `@GWOEM_TRACE` to 1 makes each entry point stamp a character into the
-bottom screen line. It needs no part of GW-BASIC, so it works when nothing else
-does.
+bottom screen line — a fixed cell per routine, plus a wrapping chronological
+trace on the line above. It needs no part of GW-BASIC, so it works when nothing
+else does, and reading the order of calls out of video memory is what located
+every fault below. The second tool is QEMU's `-d in_asm,cpu` log: run-length
+encoding the `CS:EIP` it reports per translation block gives an execution path
+to walk backwards from.
 
-### Four translator bugs the running image exposed
+### Six translator bugs the running image exposed
 
 Each of these assembled cleanly and would never have been found statically.
 
@@ -365,6 +439,24 @@ Each of these assembled cleanly and would never have been found statically.
   routines but numbers, defined by `GIOTBL`'s `DEV` macro counting down from
   `377o`; and the prefix of a concatenated name was being module-tagged, so
   `GIOTBL` defined `@GIOTBL@_@S_LPT1` while `GIO86` read `@@S_LPT1`.
+- **A listing directive hid a table from the CSEG scan.** `mkcsdata.py` treats a
+  label alone on its line as data if storage follows, but `$FOTB:` is followed by
+  `.RADIX 10` and only then by the table, so it was classified as code and read
+  from DSEG. It is `$FOTNV`'s bracket control table, which decides how many
+  powers of ten to apply to get the printable digits into the integer part.
+- **`XLAT` and the string instructions take an operand only to name a
+  segment.** The address is fixed — `BX`, or `SI` and `DI` — and MASM emits the
+  override that the operand's segment implies. All twelve sites name `?CSLAB`,
+  which `GWSTS` and `MATH1` define in CSEG as "Code segment dummy label", and
+  the comments say it outright: `FETCH FROM CS`, `MUST FETCH FROM CODE SEGMENT`.
+  The translator was dropping the operand and emitting bare `xlatb`, `lodsw` and
+  `movsw`, so the **entire floating-point library read its constants out of
+  DSEG** — the bracket control table, the powers of ten, the polynomial
+  coefficients for `LOG`, `EXP`, `SIN` and `ATN`. Every float printed as seven
+  zero-padded digits with no decimal point, and dividing by a power of ten
+  divided by zero. `mkcsdata.py` now collects these operands too, and the
+  translator writes the address out — `lods word [cs:si]` — which is how fasm
+  spells the same two bytes.
 
 ## Files
 
@@ -376,13 +468,13 @@ copyright notices stay.
 |---|---|
 | `make.py` | runs everything below in order |
 | `common.py` | paths, fasm invocation, extracting the originals from git |
-| `units.py` | which files form one translation unit, and the link order |
+| `units.py` | which files form one translation unit, and the link order, including the forced tail |
 | `masm2fasm.py` | the translator; per-module or single-unit mode |
 | `headers.py` | hand-written fasm replacements for the untranslatable macros |
 | `mksymtab.py` | classifies symbols as code/data/const from `EXTRN :NEAR` vs `:WORD` |
 | `mkmacros.py` | every macro name defined in the sources |
 | `mkglobals.py` | per-module `PUBLIC` ∪ `EXTRN` sets |
-| `mkcsdata.py` | data labels living in CSEG, which need a `CS:` override |
+| `mkcsdata.py` | labels living in CSEG whose reads need a `CS:` override |
 | `convert.py` | translates the sources in place, writes `GWBASIC.ASM` and `GWSTUB.INC` |
 | `build.py` | assembles each module separately (regression check) |
 | `link.py` | assembles `GWBASIC.ASM` and reports sizes and invariants |

@@ -4,8 +4,12 @@
 ; modules are INCLUDEd here in link order rather than assembled separately:
 ; GWDATA first, because it opens the code segment at offset 0 with BEGCSG
 ; and does the "ORG 400O" that leaves room for the OS control block, with
-; START right after; BIBOOT last, because it is the entry point and its own
-; comment says it "is included in the linker file list AFTER all others".
+; START right after.
+;
+; ITSA86, GWINIT and BIBOOT last, in that order, because MAPINI moves the
+; data segment on top of everything that follows ITSA86's CSEND -- that is
+; how GW-BASIC reclaims the memory its initialisation code occupies -- so
+; only initialisation code may be linked there.  See scripts/units.py.
 ;
 ; The image is one flat CSEG followed by DSEG.  GWINIT derives DS from CS at
 ; run time (DS = CS + offset(BEGDSG)/16), so both have to live in one 64K
@@ -49,13 +53,11 @@ include 'GIOLPT.ASM'
 include 'GIOSCN.ASM'
 include 'GIOTBL.ASM'
 include 'GWEVAL.ASM'
-include 'GWINIT.ASM'
 include 'GWLIST.ASM'
 include 'GWMAIN.ASM'
 include 'GWRAM.ASM'
 include 'GWSTS.ASM'
 include 'IBMRES.ASM'
-include 'ITSA86.ASM'
 include 'KANJ86.ASM'
 include 'MACLNG.ASM'
 include 'MATH1.ASM'
@@ -63,8 +65,10 @@ include 'MATH2.ASM'
 include 'NEXT86.ASM'
 include 'SCNDRV.ASM'
 include 'SCNEDT.ASM'
-include 'BIBOOT.ASM'
 include 'GWOEM.ASM'
+include 'ITSA86.ASM'
+include 'GWINIT.ASM'
+include 'BIBOOT.ASM'
 
 ; DSEG starts at the next paragraph, because GWINIT computes DS as
 ; CS + offset(BEGDSG)/16 and that division has to be exact.
@@ -105,13 +109,11 @@ include 'GIOLPT.ASM'
 include 'GIOSCN.ASM'
 include 'GIOTBL.ASM'
 include 'GWEVAL.ASM'
-include 'GWINIT.ASM'
 include 'GWLIST.ASM'
 include 'GWMAIN.ASM'
 include 'GWRAM.ASM'
 include 'GWSTS.ASM'
 include 'IBMRES.ASM'
-include 'ITSA86.ASM'
 include 'KANJ86.ASM'
 include 'MACLNG.ASM'
 include 'MATH1.ASM'
@@ -119,7 +121,9 @@ include 'MATH2.ASM'
 include 'NEXT86.ASM'
 include 'SCNDRV.ASM'
 include 'SCNEDT.ASM'
-include 'BIBOOT.ASM'
 include 'GWOEM.ASM'
+include 'ITSA86.ASM'
+include 'GWINIT.ASM'
+include 'BIBOOT.ASM'
 
 @GWBASIC_DSEG_SIZE = $

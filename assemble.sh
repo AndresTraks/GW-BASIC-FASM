@@ -5,7 +5,7 @@
 #
 # The sources here are fasm; GWBASIC.ASM includes every module in link order.
 # See scripts/README.md for how they were converted from the original MASM,
-# and for why the resulting image links but does not yet run.
+# and for what of the resulting interpreter has been exercised.
 #
 # Set FASM to override, e.g. FASM=fasm or FASM="wine /path/to/FASM.EXE".
 set -e

@@ -27,14 +27,25 @@ macro MARK col, ch {
   if @GWOEM_TRACE
         push    es
         push    ax
+        push    di
         mov     ax, 0B800h
         mov     es, ax
         mov     ax, 0F00h + ch
-        mov     [es:24*80*2 + col*2], ax
+        mov     [es:24*80*2 + col*2], ax     ; presence: one fixed cell each
+        mov     di, [cs:@GWOEM_SEQ]          ; order: appended, wrapping
+        mov     [es:di], ax
+        add     di, 2
+        cmp     di, 24*80*2
+        jb      @f
+        mov     di, 23*80*2
+    @@: mov     [cs:@GWOEM_SEQ], di
+        pop     di
         pop     ax
         pop     es
   end if
 }
+
+@GWOEM_SEQ    dw 23*80*2                ; next cell of the chronological trace
 
 ; ---------------------------------------------------------------------------
 ; Geometry and the video buffer.  Held in the code segment because a .COM has
@@ -87,6 +98,7 @@ macro MARK col, ch {
 ; SCRINP - GIO86: "[AX]=Read char at (DH,DL)".  Entered with carry set when the
 ; call comes from the SCREEN function, which makes no difference here.
 @SCRINP:
+        MARK 12,'I'
         push    es
         push    di
         call    @GWOEM_VIDPOS
@@ -98,6 +110,7 @@ macro MARK col, ch {
 
 ; CLREOL - SCNDRV: "Clear to end of line from (DH,DL)".
 @CLREOL:
+        MARK 14,'E'
         push    es
         push    di
         push    ax
@@ -117,15 +130,28 @@ macro MARK col, ch {
         pop     es
         ret
 
-; CLRSCN - GWSTS calls it with AL = 2 ("specify text only") and carry clear
-; ("no-carry = internal parameter"), then falls into WHOME, so the caller
-; positions the cursor afterwards.
+; CLRSCN - clearing the screen is split between the two layers, and this is the
+; OEM half.  SCNDRV's CCLRSN enters with "CLC ; no-carry = internal parameter /
+; MOV AL,LOW 2 ; specify text only" and then falls into WHOME, so the caller
+; positions the cursor afterwards; GWSTS's CLS statement calls it directly.
+;
+; Erasing the hardware is this layer's job.  The driver's half is SCNCLR, which
+; runs TTBINI over the line terminator table, homes the graphics and text
+; cursors and refreshes the soft-key line -- and which, like SCNSWI, is PUBLIC
+; in SCNDRV and called from nowhere in GW-BASIC, so the OEM layer is the only
+; thing that can call it.  It matters: LINTTB is uninitialised storage, and a
+; zero entry reads as a WRAP terminator, so until TTBINI has run every line
+; looks like a continuation of the one above it and the first ENTER sends the
+; cursor to the bottom of the screen.
 @CLRSCN:
         MARK 8,'5'
-        push    es
-        push    di
         push    ax
+        push    bx
         push    cx
+        push    dx
+        push    si
+        push    di
+        push    es
         mov     es, [cs:@GWOEM_VSEG]
         xor     di, di
         mov     al, [cs:@GWOEM_WIDTH]
@@ -135,10 +161,14 @@ macro MARK col, ch {
         mov     ah, [cs:@GWOEM_ATTR]
         cld
         rep     stosw
-        pop     cx
-        pop     ax
-        pop     di
+        call    @SCNCLR
         pop     es
+        pop     di
+        pop     si
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
         clc
         ret
 
@@ -147,6 +177,7 @@ macro MARK col, ch {
 ;   BH = destination column, CL = row count, CH = column count; all 1-based.
 ; Source and destination overlap, so the row order follows the direction.
 @SCROLL:
+        MARK 16,'L'
         push    es
         push    ds
         push    ax
@@ -222,6 +253,7 @@ macro MARK col, ch {
 ; CSRDSP - GWSTS: called after CSRFLG changed, with AL the new cursor type;
 ; 0 means off.  Uses the BIOS so the hardware cursor shape is right.
 @CSRDSP:
+        MARK 18,'C'
         push    ax
         push    bx
         push    cx
@@ -246,6 +278,7 @@ macro MARK col, ch {
 ; was built for is accepted; anything else returns carry for "Illegal function
 ; call".
 @SWIDTH:
+        MARK 20,'W'
         push    ax
         cmp     al, [cs:@GWOEM_WIDTH]
         pop     ax
@@ -260,6 +293,7 @@ macro MARK col, ch {
 ; low level routine".  This layer has no graphics, so every SCREEN request is
 ; refused and the pixel primitives are never reached.
 @SCRSTT:
+        MARK 22,'S'
         stc
         ret
 
@@ -277,16 +311,23 @@ macro MARK col, ch {
 ; LCARET (carriage return), 10 is LFEED, 8 is BAKSPC -- so the mapping is the
 ; identity, and all this has to decide is function versus character.  Without
 ; it, carriage return and linefeed reach SCROUT and are drawn as glyphs.
+;
+; Three ranges are functions.  Under 32 is a C0 control code.  127 is DEL,
+; which CTLNDL turns into a space and so into FUNTAB entry 32, CDELET.  255 is
+; GW-BASIC's "mark line as not for input": GWMAIN prints it after "Ok" with
+; "MOV AL,LOW 377O / CALL OUTDO ;FLAG AS NOT USER INPUT", and BIMISC after a
+; LIST line, and CTLNMK answers it by setting TRMNUL on the line's terminator.
+; Reported as a character instead, it is drawn as a glyph -- which is what the
+; stray character after the "Ok" prompt was.
 @PRTMAP:
 @EDTMAP:
         cmp     al, 32
         jb      @@pm_func               ; C0 control code
         cmp     al, 127
         je      @@pm_func               ; DEL, which SCNDRV maps to a space
-        cmp     ah, 255                 ; a character: print it.  AH is left
-        jne     @@pm_ok                 ; alone unless it would be mistaken
-        xor     ah, ah                  ; for the function marker
-@@pm_ok:
+        cmp     al, 255
+        je      @@pm_func               ; "mark line as not for input"
+        xor     ah, ah                  ; a character: print it
         or      al, al                  ; ZF = 0, AL is 32 or more here
         ret
 @@pm_func:
@@ -295,22 +336,39 @@ macro MARK col, ch {
         ret
 
 ; ---------------------------------------------------------------------------
-; KEYINP - GIO86: "[AX]=next key from keyboard if one exists / JE POLKXI
-; ;branch if no key present".  So AX is the character and ZF means "nothing".
-; Extended keys (BIOS returns AL = 0) are discarded here, which is what costs
-; this layer its arrow keys and function keys.
+; KEYINP - GIOKYB's POLKEY: "CALL KEYINP ; [AX]=next key from keyboard if one
+; exists / JE POLKXI ;branch if no key present / JAE NOTTWO ;branch if not
+; 2-byte key sequence".  So AX is the key, ZF means nothing is waiting, and
+; carry means AH holds a prefix byte -- which this layer never reports.
+;
+; The key has to come from DOS, not from INT 16h.  MS-DOS 1.25's IO.SYS takes
+; over INT 9 and queues scan codes itself, leaving the BIOS buffer at 40:1A
+; permanently empty, so INT 16h never reports a key under it.  MSDOSU declares
+; exactly two console/printer calls, "C_DCIO=6 ;Direct console I/O" and
+; "C_PRTO=5 ;Printer output", which is what the original layer used; POLKEY's
+; own test of MSDCCF, "MSDOS Ctl-C Interrupt flag", says the same.
+;
+; Extended keys arrive as a zero byte followed by the scan code.  Both are
+; dropped, which is what costs this layer its arrow and function keys.
 @KEYINP:
         MARK 6,'4'
-        mov     ah, 1
-        int     16h
-        jz      @@ki_none
-        xor     ah, ah
-        int     16h                     ; AL = ASCII, AH = scan code
+        push    dx
+        mov     ah, 6                   ; MSDOSU C_DCIO, direct console I/O
+        mov     dl, 0FFh                ; ... input, without waiting
+        int     21h
+        pop     dx
+        jz      @@ki_none               ; nothing waiting
         or      al, al
-        jz      @@ki_none               ; extended key: swallowed
+        jz      @@ki_ext                ; prefix of an extended key
         xor     ah, ah
-        or      ax, ax                  ; ZF = 0, AL is non-zero here
+        or      ax, ax                  ; ZF = 0, CF = 0: a one-byte key
         ret
+@@ki_ext:
+        push    dx
+        mov     ah, 6
+        mov     dl, 0FFh
+        int     21h                     ; swallow the scan code
+        pop     dx
 @@ki_none:
         xor     ax, ax
         or      ax, ax                  ; ZF = 1
@@ -328,12 +386,14 @@ macro MARK col, ch {
         ret
 
 ; SNDLPT - GIOLPT: "Call OEM routine to output to printer", character in AL.
+; Through DOS, for the same reason as KEYINP: MSDOSU declares "C_PRTO=5
+; ;Printer output" and nothing else that would reach a printer.
 @SNDLPT:
         push    ax
         push    dx
-        xor     ah, ah
-        xor     dx, dx                  ; LPT1
-        int     17h
+        mov     dl, al
+        mov     ah, 5                   ; MSDOSU C_PRTO, printer output
+        int     21h
         pop     dx
         pop     ax
         ret
@@ -341,10 +401,19 @@ macro MARK col, ch {
 ; ---------------------------------------------------------------------------
 ; GWINI - GWINIT: "CALL GWINI ;OEM specific initialization", called after
 ; SCNIPL, so whatever it sets here wins.  Picks the video buffer from the BIOS
-; mode byte and states the window geometry the screen driver works within.
+; mode byte, tells the screen driver the geometry and clears the screen.
+;
+; The geometry goes through SCNSWI rather than being written into CRTWID and the
+; window variables here.  SCNSWI is SCNDRV's own "Set CRT physical line width
+; ... on entry: AL=width, CL=height", it is PUBLIC and nothing in GW-BASIC calls
+; it, and it knows things this layer should not have to: it sets LINLEN as well
+; as CRTWID, sets WDORGT to the width (not the width plus one, whatever GWRAM's
+; comment says), and reserves the last line for the function-key display with
+; "DEC CL ; Reserve status line".
 @GWINI:
         MARK 0,'1'
         push    ax
+        push    cx
         push    ds
         mov     ax, 40h
         mov     ds, ax
@@ -354,21 +423,12 @@ macro MARK col, ch {
         jne     @@gi_colour
         mov     word [cs:@GWOEM_VSEG], 0B000h
 @@gi_colour:
-        pop     ax
-        push    ax
+        mov     byte [@KEYSW], 0        ; this layer has no soft-key display
         mov     al, [cs:@GWOEM_WIDTH]
-        mov     byte [@CRTWID], al
-        mov     byte [@LINLEN], al
-        inc     al                      ; GWRAM: "Rightmost column plus one"
-        mov     byte [@WDORGT], al
-        mov     al, [cs:@GWOEM_HEIGHT]
-        mov     byte [@LINCNT], al
-        mov     byte [@WDOBOT], al
-        mov     al, 1
-        mov     byte [@WDOTOP], al
-        mov     byte [@WDOLFT], al
-        mov     byte [@CSRY], al
-        mov     byte [@CSRX], al
+        mov     cl, [cs:@GWOEM_HEIGHT]
+        call    @SCNSWI
+        call    @CLRSCN
+        pop     cx
         pop     ax
         ret
 
@@ -391,6 +451,8 @@ macro MARK col, ch {
 
 ; GWTERM, SEGINI - termination and post-DS-move initialisation; nothing to do.
 @GWTERM:
+        MARK 26,'T'
+        ret
 @SEGINI:
         MARK 10,'6'
         ret
@@ -399,6 +461,7 @@ macro MARK col, ch {
 ; buffer size/loc / JB GOMERR ; & validate size / MOV CSWSIZ,DX".  No serial
 ; support, so the request is accepted unchanged and no buffer is reserved.
 @SETCBF:
+        MARK 24,'B'
         clc
         ret
 
