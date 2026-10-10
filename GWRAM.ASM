@@ -139,6 +139,9 @@ end if
 	DW	0
 	@RINIT	@FKCNUM,1  ;Number of chars. per fun. key to display
 	DB	6  ; on the last line
+	@RINIT	@FKYFMB,3  ;Soft-key display format, filled in by the OEM
+	DB	6,10,1  ;  routine FKYFMT: chars/key, keys, first key.  It
+	;  lives here because GETFMT reads it through DS.
 	@RINIT	ACTPAG,1  ;Active page
 	DB	1 dup (?)
 	@RINIT	@F_EDPG,1  ; Flag - =^O377 indicates program statement edit

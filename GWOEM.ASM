@@ -449,7 +449,7 @@ macro MARK col, ch {
 ; KEYINP - GIOKYB's POLKEY: "CALL KEYINP ; [AX]=next key from keyboard if one
 ; exists / JE POLKXI ;branch if no key present / JAE NOTTWO ;branch if not
 ; 2-byte key sequence".  So AX is the key, ZF means nothing is waiting, and
-; carry means AH holds a prefix byte -- which this layer never reports.
+; carry means AH holds a prefix byte.
 ;
 ; The key has to come from DOS, not from INT 16h.  MS-DOS 1.25's IO.SYS takes
 ; over INT 9 and queues scan codes itself, leaving the BIOS buffer at 40:1A
@@ -458,8 +458,18 @@ macro MARK col, ch {
 ; "C_PRTO=5 ;Printer output", which is what the original layer used; POLKEY's
 ; own test of MSDCCF, "MSDOS Ctl-C Interrupt flag", says the same.
 ;
-; Extended keys arrive as a zero byte followed by the scan code.  Both are
-; dropped, which is what costs this layer its arrow and function keys.
+; A key with no character arrives from DOS as a zero followed by its scan code,
+; the IBM convention.  Translating it is this layer's job, because GW-BASIC has
+; a keyboard encoding of its own and knows nothing of scan codes.  Two prefixes
+; carry it, both named at the call sites:
+;
+;   (255, n)  a control function.  POLKEY calls it "the control function range"
+;             and offers it to TRPCHK; SCNDRV's CTLDSP hands the second byte to
+;             EDTMAP and dispatches it through FUNTAB, which is indexed by the
+;             ASCII control code -- entry 30 is WCSUP, 31 WCSDWN, 29 WCSREG,
+;             28 WCSADV -- so the second byte is that index.
+;   (128, 32+n)  function key n.  CHKFKY tests exactly this and expands the
+;             soft key from STRTAB.
 @KEYINP:
         MARK 6,'4'
         push    dx
@@ -469,30 +479,162 @@ macro MARK col, ch {
         pop     dx
         jz      @@ki_none               ; nothing waiting
         or      al, al
-        jz      @@ki_ext                ; prefix of an extended key
+        jz      @@ki_ext                ; zero: a scan code follows
+        cmp     al, 27
+        je      @@ki_esc
         xor     ah, ah
         or      ax, ax                  ; ZF = 0, CF = 0: a one-byte key
         ret
+; ESC erases the line being edited, which is FUNTAB entry 21, LDELET.  INKMAP
+; turns it back into ESC for INKEY$.
+@@ki_esc:
+        mov     ax, 0FF00h + 21
+        jmp     @@ki_two
 @@ki_ext:
         push    dx
         mov     ah, 6
         mov     dl, 0FFh
-        int     21h                     ; swallow the scan code
+        int     21h                     ; ... the scan code itself
         pop     dx
+        jz      @@ki_none               ; a prefix with nothing behind it
+        cmp     al, 59                  ; F1 to F10 are scan codes 59 to 68
+        jb      @@ki_look
+        cmp     al, 68
+        ja      @@ki_look
+        sub     al, 59 - 32             ; ... and soft keys 32 upwards
+        mov     ah, 128
+        jmp     @@ki_two
+@@ki_look:
+        push    cx
+        push    si
+        mov     si, @GWOEM_KEYTAB
+        mov     cx, @GWOEM_KEYTABN
+@@ki_scan:
+        cmp     al, [cs:si]
+        je      @@ki_found
+        add     si, 3
+        loop    @@ki_scan
+        pop     si
+        pop     cx
+        jmp     @@ki_none               ; a key this layer has no use for
+@@ki_found:
+        mov     ah, [cs:si+1]
+        mov     al, [cs:si+2]
+        pop     si
+        pop     cx
+@@ki_two:
+        or      ax, ax                  ; ZF = 0 ...
+        stc                             ; ... and CF = 1: two bytes
+        ret
 @@ki_none:
         xor     ax, ax
         or      ax, ax                  ; ZF = 1
         ret
 
-; The keyboard and function-key maps.  Their contracts are not established from
-; the call sites, so they do nothing rather than guess: no key translation and
-; no soft-key display.  Arrow keys, INKEY$ on extended keys and the KEY
-; statement are the casualties.
+; Scan code, prefix, code.  The editing functions are FUNTAB indices; the
+; comment on each is SCNDRV's own name for the entry.
+@GWOEM_KEYTAB:
+        db      72, 255, 30             ; cursor up       WCSUP
+        db      80, 255, 31             ; cursor down     WCSDWN
+        db      75, 255, 29             ; cursor left     WCSREG
+        db      77, 255, 28             ; cursor right    WCSADV
+        db      71, 255, 11             ; home            WHOME
+        db      79, 255, 14             ; end             LAPPND
+        db      82, 255, 18             ; insert          LINSRT
+        db      83, 255, 127            ; delete          CDELET, via CTLNDL
+@GWOEM_KEYTABN = ($ - @GWOEM_KEYTAB) / 3
+
+; INKMAP - GIOKYB's INKEY: "CALL INKMAP ;OEM map routine for INKEY$ / JZ INKGET
+; ;OEM has no associated character / JAE INKEY1 ;branch if not 2-byte sequence".
+; The flags mean what they do for KEYINP, and this is where the universal codes
+; turn back into what a BASIC program expects to read.  That is the IBM
+; convention -- CHR$(0) and the scan code -- because that is what every program
+; written for this machine tests for.
 @INKMAP:
+        pushf
+        cmp     ah, 255
+        je      @@ik_ctl
+        cmp     ah, 128
+        je      @@ik_fun
+        popf
+        ret                             ; a character: pass it through unchanged
+@@ik_fun:
+        popf
+        add     al, 59 - 32             ; soft key n back to its scan code
+        xor     ah, ah
+        or      ax, ax                  ; ZF = 0 ...
+        stc                             ; ... CF = 1: still two bytes
+        ret
+@@ik_ctl:
+        popf
+        push    cx
+        push    si
+        mov     si, @GWOEM_KEYTAB
+        mov     cx, @GWOEM_KEYTABN
+@@ik_scan:
+        cmp     al, [cs:si+2]
+        je      @@ik_found
+        add     si, 3
+        loop    @@ik_scan
+        pop     si
+        pop     cx
+        cmp     al, 21                  ; the ESC that became "delete line"
+        jne     @@ik_drop
+        mov     ax, 27
+        or      ax, ax                  ; one byte, ZF = 0, CF = 0
+        ret
+@@ik_found:
+        mov     al, [cs:si]             ; the scan code it was made from
+        pop     si
+        pop     cx
+        xor     ah, ah
+        or      ax, ax
+        stc
+        ret
+@@ik_drop:
+        xor     ax, ax                  ; ZF = 1: nothing for INKEY$ here
+        ret
+
+; INFMAP - GIOKYB's INCHRI: "CALL INFMAP ;OEM fixed length input map routine /
+; JZ KEYGET ;OEM filtered out the key - get the next".  Fixed-length input
+; wants characters, so a two-byte key is filtered out rather than split.
 @INFMAP:
+        cmp     ah, 0
+        jne     @@if_drop
+        or      al, al                  ; ZF = 0, CF = 0: a character
+        ret
+@@if_drop:
+        xor     ax, ax                  ; ZF = 1: filtered out
+        ret
+
+; FKYFMT - GWSTS's GETFMT: "CALL FKYFMT ;OEM routine / MOV CX,word [BX+0]
+; ;CH=key count, CL=Chrs/key" and then "MOV AL,byte [BX+2]" for the number of
+; the first key to show.  So this returns BX pointing at those three bytes, and
+; they have to sit in the data segment, because GETFMT reads them through DS.
+;
+; KEYDSP draws the line itself, through SCROUT; each key costs its digits plus
+; FKCNUM characters plus a blank, so ten keys fill 80 columns and five fill 40.
+@FKYFMT:
+        push    ax
+        mov     bx, @FKYFMB
+        mov     byte [bx], 6            ; six characters of each definition
+        mov     al, [cs:@GWOEM_WIDTH]
+        cmp     al, 80
+        mov     al, 10
+        je      @@ff_keys
+        mov     al, 5
+@@ff_keys:
+        mov     [bx+1], al
+        mov     byte [bx+2], 1          ; always starting at key 1
+        pop     ax
+        ret
+
+; FKYADV - GWSTS: called when KEYSW changes to ON, and SCNDRV: "If KEYSW was
+; 0(ZF=0) then init PF start key".  The display here always starts at key 1, so
+; there is no start key to move.  MAPSUP, the super-shift mapping, has no
+; contract to take from the call site and does nothing.
 @MAPSUP:
 @FKYADV:
-@FKYFMT:
         ret
 
 ; SNDLPT - GIOLPT: "Call OEM routine to output to printer", character in AL.
@@ -533,7 +675,6 @@ macro MARK col, ch {
         jne     @@gi_colour
         mov     word [cs:@GWOEM_VSEG], 0B000h
 @@gi_colour:
-        mov     byte [@KEYSW], 0        ; this layer has no soft-key display
         mov     al, [cs:@GWOEM_WIDTH]
         mov     cl, [cs:@GWOEM_HEIGHT]
         call    @SCNSWI
@@ -550,9 +691,8 @@ macro MARK col, ch {
         MARK 2,'2'
         ; GWINIT sets KEYSW to 255 just before this call -- "if heading is
         ; printed, display Fn keys also" -- and then calls SKEYON, which walks
-        ; the ten soft keys through FKYFMT and FKYADV.  Those are not
-        ; implemented here, so decline the display rather than hang in it.
-        mov     byte [@KEYSW], 0
+        ; the soft keys through FKYFMT.  That is left alone, so the key line
+        ; comes up with the heading, as it does on the IBM machines.
         mov     bx, @GWOEM_HEAD
         or      bx, bx                  ; ZF = 0, the address is non-zero
         ret
