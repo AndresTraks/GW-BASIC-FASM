@@ -727,6 +727,121 @@ macro MARK col, ch {
         ret
 
 ; ---------------------------------------------------------------------------
+; DONOTE - GWSTS states the contract itself: "DONOTE(AL: voice (0=forground,
+; 1=back), CX:frequency, DX:duration (1=18.7ms)) queues note for execution,
+; saves all regs", and the PLAY code pins the unit down -- "[DX]=400 will play
+; 1 second", so a unit is 2.5ms.  BEEP asks for 800Hz for 100 of them, a
+; quarter second.  A zero frequency is a rest, a zero duration stops the sound,
+; and SNDRST calls in with AL=255 to silence everything.  Carry means the note
+; was refused, which GWSTS turns into "Illegal function call".
+;
+; There is one speaker and no interrupt to drive a queue from, so a background
+; note is played in the foreground too: the note is heard, but the program
+; waits for it rather than running on.
+@DONOTE:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        push    si
+        mov     si, dx                  ; SI = duration, in 2.5ms units
+        cmp     al, 255
+        je      @@dn_hush
+        or      si, si
+        jz      @@dn_hush               ; "If Duration is 0, then just turn off"
+        or      cx, cx
+        jz      @@dn_wait               ; a rest: time passes, silently
+        cmp     cx, 37                  ; "Frequency must be at least 37 Hz"
+        jb      @@dn_bad
+        mov     bx, cx
+        mov     dx, 18                  ; 1193180, the timer's input in Hz
+        mov     ax, 35B4h
+        div     bx                      ; ... over the frequency: the divisor
+        mov     bx, ax
+        pushf
+        cli
+        mov     al, 0B6h                ; channel 2, both bytes, square wave
+        out     43h, al
+        mov     al, bl
+        out     42h, al
+        mov     al, bh
+        out     42h, al
+        popf
+        in      al, 61h
+        or      al, 3                   ; gate the timer, connect the speaker
+        out     61h, al
+@@dn_wait:
+        call    @GWOEM_PAUSE
+@@dn_hush:
+        in      al, 61h
+        and     al, 0FCh
+        out     61h, al
+        pop     si
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        clc
+        ret
+@@dn_bad:
+        pop     si
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        stc
+        ret
+
+; Wait SI units of 2.5ms.  The BIOS tick is 55ms, far too coarse for a note, so
+; this counts channel 0 of the same timer instead: it free-runs at 1.193MHz,
+; which makes a unit 2983 of its counts.  Interrupts stay enabled, so keys are
+; still queued while a note sounds.
+@GWOEM_PAUSE:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        push    si
+        push    di
+        mov     ax, 2983
+        mul     si
+        mov     cx, dx
+        mov     bx, ax                  ; CX:BX = counts still to wait
+        call    @GWOEM_TICK0
+        mov     di, ax
+@@pa_loop:
+        call    @GWOEM_TICK0
+        mov     dx, di
+        mov     di, ax
+        sub     dx, ax                  ; the counter runs down, so this is
+        sub     bx, dx                  ;  the elapsed count, wrap included
+        sbb     cx, 0
+        jnc     @@pa_loop
+        pop     di
+        pop     si
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+; AX = the current count of timer channel 0, latched so the two halves agree.
+@GWOEM_TICK0:
+        push    cx
+        pushf
+        cli
+        xor     al, al
+        out     43h, al
+        in      al, 40h
+        mov     cl, al
+        in      al, 40h
+        mov     ah, al
+        mov     al, cl
+        popf
+        pop     cx
+        ret
+
+; ---------------------------------------------------------------------------
 ; The rest of the OEM layer, which this text-mode reconstruction does not
 ; implement.  SCRSTT refuses every screen mode, so the graphics primitives are
 ; unreachable; the sound, light pen, joystick and serial entry points return
@@ -767,7 +882,6 @@ macro MARK col, ch {
 @GETFBC:
 @SCRATR:
 @CSRATR:
-@DONOTE:
 @POLLEV:
 @RDPEN:
 @RDSTIK:
