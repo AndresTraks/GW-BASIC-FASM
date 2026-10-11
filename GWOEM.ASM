@@ -777,7 +777,31 @@ macro MARK col, ch {
         mov     cl, [cs:@GWOEM_HEIGHT]
         call    @SCNSWI
         call    @CLRSCN
+        call    @GWOEM_HOOK1C           ; the tick that drains the note queue
         pop     cx
+        pop     ax
+        ret
+
+; Take over INT 1Ch, the BIOS user timer tick, keeping what was there to chain
+; to.  GWTERM has to put it back: the vector would otherwise point into memory
+; DOS has handed to the next program.
+@GWOEM_HOOK1C:
+        push    ax
+        push    ds
+        cmp     word [cs:@GWOEM_OLD1C+2], 0
+        jne     @@hk_done               ; already hooked
+        xor     ax, ax
+        mov     ds, ax
+        cli
+        mov     ax, [1Ch*4]
+        mov     [cs:@GWOEM_OLD1C], ax
+        mov     ax, [1Ch*4+2]
+        mov     [cs:@GWOEM_OLD1C+2], ax
+        mov     word [1Ch*4], @GWOEM_TICK
+        mov     [1Ch*4+2], cs
+        sti
+@@hk_done:
+        pop     ds
         pop     ax
         ret
 
@@ -800,6 +824,32 @@ macro MARK col, ch {
 ; GWTERM, SEGINI - termination and post-DS-move initialisation; nothing to do.
 @GWTERM:
         MARK 26,'T'
+        push    ax
+        push    bx
+        push    di
+        push    ds
+        mov     al, 255
+        call    @DONOTE                 ; stop the speaker and drop the queue
+        xor     di, di                  ; and give back any COM interrupt a
+        call    @GWOEM_CMSHUT           ;  program left open
+        mov     di, 1
+        call    @GWOEM_CMSHUT
+        cmp     word [cs:@GWOEM_OLD1C+2], 0
+        je      @@gt_done               ; never hooked
+        xor     ax, ax
+        mov     ds, ax
+        cli
+        mov     ax, [cs:@GWOEM_OLD1C]
+        mov     [1Ch*4], ax
+        mov     ax, [cs:@GWOEM_OLD1C+2]
+        mov     [1Ch*4+2], ax
+        mov     word [cs:@GWOEM_OLD1C+2], 0
+        sti
+@@gt_done:
+        pop     ds
+        pop     di
+        pop     bx
+        pop     ax
         ret
 @SEGINI:
         MARK 10,'6'
@@ -833,47 +883,44 @@ macro MARK col, ch {
 ; and SNDRST calls in with AL=255 to silence everything.  Carry means the note
 ; was refused, which GWSTS turns into "Illegal function call".
 ;
-; There is one speaker and no interrupt to drive a queue from, so a background
-; note is played in the foreground too: the note is heard, but the program
-; waits for it rather than running on.
+; A background note -- AL=1, which PLAY's "MB" selects -- is appended to a
+; queue and DONOTE returns at once, which is what makes the word "queues" in
+; that contract true and lets GWSTS go on to "JMP POLKEY ;Allow CTL-C to
+; interrupt and return" while the note is still sounding.  The queue is drained
+; by the timer tick, INT 1Ch, which the BIOS calls from its own INT 8 handler
+; 18.2 times a second.  There is one speaker, so a foreground note waits for
+; the queue to run dry and then sounds synchronously.
 @DONOTE:
         push    ax
         push    bx
         push    cx
         push    dx
         push    si
-        mov     si, dx                  ; SI = duration, in 2.5ms units
         cmp     al, 255
-        je      @@dn_hush
-        or      si, si
-        jz      @@dn_hush               ; "If Duration is 0, then just turn off"
+        je      @@dn_reset              ; SNDRST: drop the queue and go quiet
+        or      dx, dx
+        jz      @@dn_reset              ; "If Duration is 0, then just turn off"
         or      cx, cx
-        jz      @@dn_wait               ; a rest: time passes, silently
+        jz      @@dn_rest
         cmp     cx, 37                  ; "Frequency must be at least 37 Hz"
         jb      @@dn_bad
-        mov     bx, cx
-        mov     dx, 18                  ; 1193180, the timer's input in Hz
-        mov     ax, 35B4h
-        div     bx                      ; ... over the frequency: the divisor
-        mov     bx, ax
-        pushf
-        cli
-        mov     al, 0B6h                ; channel 2, both bytes, square wave
-        out     43h, al
-        mov     al, bl
-        out     42h, al
-        mov     al, bh
-        out     42h, al
-        popf
-        in      al, 61h
-        or      al, 3                   ; gate the timer, connect the speaker
-        out     61h, al
-@@dn_wait:
+        call    @GWOEM_SNDDIV           ; BX = the timer divisor for CX Hz
+        jmp     @@dn_voice
+@@dn_rest:
+        xor     bx, bx                  ; a rest: time passes, silently
+@@dn_voice:
+        or      al, al
+        jnz     @@dn_back
+        call    @GWOEM_SNDWT            ; one speaker: let the queue finish
+        call    @GWOEM_TONE
+        mov     si, dx
         call    @GWOEM_PAUSE
-@@dn_hush:
-        in      al, 61h
-        and     al, 0FCh
-        out     61h, al
+        xor     bx, bx
+        call    @GWOEM_TONE             ; and the rest after it is silent
+        jmp     @@dn_ok
+@@dn_back:
+        call    @GWOEM_SNDPUT
+@@dn_ok:
         pop     si
         pop     dx
         pop     cx
@@ -881,6 +928,17 @@ macro MARK col, ch {
         pop     ax
         clc
         ret
+@@dn_reset:
+        pushf
+        cli
+        mov     byte [cs:@GWOEM_SNDON], 0
+        xor     ax, ax
+        mov     word [cs:@GWOEM_SNDHD], ax
+        mov     word [cs:@GWOEM_SNDTL], ax
+        popf
+        xor     bx, bx
+        call    @GWOEM_TONE
+        jmp     @@dn_ok
 @@dn_bad:
         pop     si
         pop     dx
@@ -890,10 +948,165 @@ macro MARK col, ch {
         stc
         ret
 
-; Wait SI units of 2.5ms.  The BIOS tick is 55ms, far too coarse for a note, so
-; this counts channel 0 of the same timer instead: it free-runs at 1.193MHz,
-; which makes a unit 2983 of its counts.  Interrupts stay enabled, so keys are
-; still queued while a note sounds.
+; CX Hz -> BX, the divisor for channel 2 of the 1.193MHz timer.
+@GWOEM_SNDDIV:
+        push    ax
+        push    cx
+        push    dx
+        mov     bx, cx
+        mov     dx, 18                  ; 1193180, the timer's input in Hz
+        mov     ax, 35B4h
+        div     bx                      ; ... over the frequency
+        mov     bx, ax
+        pop     dx
+        pop     cx
+        pop     ax
+        ret
+
+; Sound the tone whose divisor is in BX, or silence the speaker if BX is zero.
+; Saves every register.
+@GWOEM_TONE:
+        push    ax
+        pushf
+        cli
+        or      bx, bx
+        jz      @@tn_off
+        mov     al, 0B6h                ; channel 2, both bytes, square wave
+        out     43h, al
+        mov     al, bl
+        out     42h, al
+        mov     al, bh
+        out     42h, al
+        in      al, 61h
+        or      al, 3                   ; gate the timer, connect the speaker
+        out     61h, al
+        popf
+        pop     ax
+        ret
+@@tn_off:
+        in      al, 61h
+        and     al, 0FCh
+        out     61h, al
+        popf
+        pop     ax
+        ret
+
+; Append the note in BX (divisor) and DX (duration, 2.5ms units) to the queue,
+; waiting for room if it is full -- the tick is emptying it, and refusing the
+; note would come out of GWSTS as "Illegal function call".
+@GWOEM_SNDPUT:
+        push    ax
+        push    cx
+        push    dx
+        push    si
+        push    di
+        mov     ax, 2983                ; the counts of the 1.193MHz timer in
+        mul     dx                      ;  one 2.5ms unit
+        mov     cx, dx
+        mov     di, ax                  ; CX:DI = the note's length, in counts
+        sti
+@@sp_wait:
+        mov     si, [cs:@GWOEM_SNDTL]
+        add     si, 6
+        cmp     si, @GWOEM_SNDQN*6
+        jb      @@sp_room
+        xor     si, si
+@@sp_room:
+        cmp     si, [cs:@GWOEM_SNDHD]
+        je      @@sp_wait               ; full: the tick will make room
+        xchg    si, [cs:@GWOEM_SNDTL]   ; SI = where this note goes, and the
+                                        ;  tail now points past it
+        mov     word [cs:@GWOEM_SNDQ+si], bx
+        mov     word [cs:@GWOEM_SNDQ+si+2], di
+        mov     word [cs:@GWOEM_SNDQ+si+4], cx
+        pushf
+        cli
+        cmp     byte [cs:@GWOEM_SNDON], 0
+        jne     @@sp_done               ; the tick is already playing the queue
+        mov     byte [cs:@GWOEM_SNDON], 1
+        mov     word [cs:@GWOEM_SNDREM], 0
+        mov     word [cs:@GWOEM_SNDREM+2], 0
+        call    @GWOEM_SNDNXT           ; nothing was sounding: start it here
+@@sp_done:
+        popf
+        pop     di
+        pop     si
+        pop     dx
+        pop     cx
+        pop     ax
+        ret
+
+; Wait for the background queue to fall silent.  Interrupts have to be on for
+; that to ever happen, since the tick is what empties it.
+@GWOEM_SNDWT:
+        sti
+@@sw_loop:
+        cmp     byte [cs:@GWOEM_SNDON], 0
+        jne     @@sw_loop
+        ret
+
+; Start the next queued note, or stop if the queue has run out.  Called with
+; interrupts off, from the tick and from SNDPUT.  SNDREM is what is left of the
+; note that just ended, which is negative; adding the next note's length to it
+; rather than replacing it keeps the tempo from drifting a tick per note.
+@GWOEM_SNDNXT:
+        push    ax
+        push    bx
+        push    si
+        mov     si, [cs:@GWOEM_SNDHD]
+        cmp     si, [cs:@GWOEM_SNDTL]
+        je      @@sn_empty
+        mov     ax, word [cs:@GWOEM_SNDQ+si+2]
+        add     word [cs:@GWOEM_SNDREM], ax
+        mov     ax, word [cs:@GWOEM_SNDQ+si+4]
+        adc     word [cs:@GWOEM_SNDREM+2], ax
+        mov     bx, word [cs:@GWOEM_SNDQ+si]
+        add     si, 6
+        cmp     si, @GWOEM_SNDQN*6
+        jb      @@sn_head
+        xor     si, si
+@@sn_head:
+        mov     [cs:@GWOEM_SNDHD], si
+        call    @GWOEM_TONE
+        pop     si
+        pop     bx
+        pop     ax
+        ret
+@@sn_empty:
+        mov     byte [cs:@GWOEM_SNDON], 0
+        xor     bx, bx
+        call    @GWOEM_TONE
+        pop     si
+        pop     bx
+        pop     ax
+        ret
+
+; The timer tick, INT 1Ch.  Channel 0 free-runs on a divisor of 65536, so one
+; tick is exactly 65536 of the counts a note's length is measured in.
+@GWOEM_TICK:
+        push    ax
+        cmp     byte [cs:@GWOEM_SNDON], 0
+        je      @@tk_chain
+        sub     word [cs:@GWOEM_SNDREM], 0
+        sbb     word [cs:@GWOEM_SNDREM+2], 1
+        jnc     @@tk_chain              ; this note is still sounding
+        call    @GWOEM_SNDNXT
+@@tk_chain:
+        pop     ax
+        jmp     far dword [cs:@GWOEM_OLD1C]  ; whoever had the tick still gets it
+
+@GWOEM_SNDQN  = 32                      ; notes the queue holds, less one
+@GWOEM_SNDQ   db @GWOEM_SNDQN*6 dup (0) ; divisor, then length in timer counts
+@GWOEM_SNDHD  dw 0                      ; the note the tick is sounding
+@GWOEM_SNDTL  dw 0                      ; where the next note goes
+@GWOEM_SNDREM dw 0, 0                   ; counts left of the note sounding now
+@GWOEM_SNDON  db 0                      ; non-zero while the queue is playing
+@GWOEM_OLD1C  dw 0, 0                   ; the tick vector this layer displaced
+
+; Wait SI units of 2.5ms.  The tick is 55ms, far too coarse for a note, so this
+; counts channel 0 of the same timer instead: it free-runs at 1.193MHz, which
+; makes a unit 2983 of its counts.  Interrupts stay enabled, so keys are still
+; queued and the tick still runs while a foreground note sounds.
 @GWOEM_PAUSE:
         push    ax
         push    bx
