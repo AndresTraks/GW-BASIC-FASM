@@ -1763,17 +1763,7 @@ macro MARK col, ch {
 
 ; PNTINI - "INIT PAINT STUFF & CHECK BORDER ATTRIB", the border in AL, carry
 ; if it is not a colour this screen has.
-; PAINT is refused.  SCANR and SCANL below fill a convex region correctly, but
-; the queue they feed is driven by counts -- SKPCNT against MOVCNT, and the
-; overhang entries either side -- whose exact meaning the call sites do not
-; pin down, and a reconstruction that is close but not right either walks out
-; of a shape whose outline is solid and floods the screen, or stops a few lines
-; in and leaves a band.  Refusing says so; filling half a circle would not.
 @PNTINI:
-        stc
-        ret
-
-@GWOEM_PNTINI:
         push    bx
         mov     bl, [cs:@GWOEM_GAMSK]
         cmp     al, bl
@@ -1786,26 +1776,46 @@ macro MARK col, ch {
         stc
         ret
 
-; SCANR - "PERFORM LOW LEVEL RIGHT SCAN".  DX arrives as SKPCNT, the length of
-; the run above or below that this line has to account for: border points are
-; stepped over while that lasts, then everything up to the next border point is
-; painted.  Back come DX as what is left of the run, BX as the number painted,
-; CL as whether any of it was new, and CSAVEA/CSAVEM as the point it started
-; from -- SCANL1 puts the C back there before scanning the other way.
+; SCANR - "PERFORM LOW LEVEL RIGHT SCAN".  DX arrives as SKPCNT, the run the
+; line above or below painted, which is how much of this line is worth looking
+; at.  The border may lie across the start of it -- scanning a circle upwards
+; lands on the arc every time, because the line below ends where the arc
+; begins -- so border is stepped over while the run lasts, and what is left of
+; the run beyond it is painted, out to the next border or the edge.
+;
+; Two bounds keep the scan inside the shape, and both of them matter.  Running
+; out of run while still on border means this line has nothing: the top of a
+; circle, where the arc covers the whole of the line below.  And the scan is
+; only allowed to paint once it has found something to paint within the run --
+; stepping over the last of the border on the last of the count and painting
+; whatever lies beyond it is how a fill escapes a closed shape and floods the
+; screen.
+;
+; Back come DX as what is left of the run, BX as the number painted, CL as
+; whether any of it was new, and CSAVEA/CSAVEM as the first point painted --
+; not the point the scan started from.  SCANL1 puts the C back there before
+; scanning the other way, and the other way from a border point is straight
+; out of the shape.
 @SCANR:
         push    ax
-        call    @FETCHC
-        mov     [@CSAVEA], bx
-        mov     byte [@CSAVEM], al
         mov     [cs:@GWOEM_PSKIP], dx
         mov     word [cs:@GWOEM_PCNT], 0
         mov     byte [cs:@GWOEM_PNEW], 0
-; Starting on the border means this line has nothing to paint: say so, and the
-; caller takes the next entry off the queue.  Stepping over the border instead,
-; to look for more of the run beyond it, is what the skip count is for -- but a
-; scan that goes looking that way runs out the far side of a shape whose line
-; is solid, and paints the rest of the screen.  Lines split by an obstacle are
-; the cost of not doing it.
+@@rs_skip:
+        cmp     word [cs:@GWOEM_PSKIP], 0
+        jle     @@rs_done
+        call    @READC
+        cmp     al, [cs:@GWOEM_PBORD]
+        jne     @@rs_mark
+        call    @GWOEM_GATRT
+        jc      @@rs_done
+        call    @RIGHTC
+        dec     word [cs:@GWOEM_PSKIP]
+        jmp     @@rs_skip
+@@rs_mark:
+        call    @FETCHC                 ; where the painting will start
+        mov     [@CSAVEA], bx
+        mov     byte [@CSAVEM], al
 @@rs_paint:
         call    @READC
         cmp     al, [cs:@GWOEM_PBORD]
