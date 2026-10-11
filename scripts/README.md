@@ -70,10 +70,11 @@ reserved explicitly because fasm does not pad for an `org` jump.
 Each translation unit ends by purging its own macros, since MASM scopes macros
 per file. All of that is in the files, which is what lets fasm build unaided.
 
-### Three references that had to be rewritten
+### Four things `convert.py` patches
 
-`convert.py` patches three things that cannot be expressed as LINK expressed
-them. Each is checked for presence, so a source change cannot silently skip one.
+Three references cannot be expressed as LINK expressed them, and one storage
+cell the OEM layer needs has no original to translate. Each is checked for
+presence, so a source change cannot silently skip one.
 
 - **`BEGDSG`.** `GWINIT` declares it `EXTRN :NEAR` although it lives in the data
   segment, so that `OFFSET BEGDSG` yields the distance from the start of CSEG to
@@ -92,6 +93,11 @@ them. Each is checked for presence, so a source change cannot silently skip one.
   macro bodies, which left `R1` textually identical to `R` and put `MAXUPD` and
   `MINUPD` one byte too high — both are read by other modules. The offset is now
   stated directly as `NAME = $ - 1`.
+- **`FKYFMB`, three bytes added to `GWRAM`.** `FKYFMT` has to hand `GETFMT` a
+  pointer that `GETFMT` reads through `DS`, so the soft-key display format
+  belongs in the data segment beside the rest of the key line's state. Nothing
+  in the original reserved it. Patching it in rather than editing `GWRAM.ASM`
+  keeps the hand edit from being lost the next time `convert.py` runs.
 
 ## Converting in place
 
@@ -292,7 +298,7 @@ MS-DOS 1.25 floppy under QEMU:
 ```
 GW-BASIC
 (C) Copyright Microsoft 1982
-62845 Bytes free
+62842 Bytes free
 Ok
 RUN
  1  3  4  5  9  7  16  9  25  11
@@ -301,13 +307,19 @@ Ok
 ```
 
 Exercised and correct: integer and floating-point arithmetic, `SQR` `ATN` `^`,
-`LEFT$` `MID$` `LEN` `ASC` `CHR$` `STR$` `VAL` and concatenation, `PRINT`
-with both separators, `PRINT USING`, `DIM` and arrays, `FOR`/`NEXT`, `DEF FN`,
-`GOSUB`/`RETURN`, `LIST`, `RUN`, `END`, multi-statement lines, the screen
-editor and scrolling.
+`LEFT$` `MID$` `LEN` `ASC` `CHR$` `STR$` `VAL` `INSTR` `STRING$` and
+concatenation, `MID$` assignment, `PRINT` with both separators, `PRINT USING`,
+`DIM` and arrays, `SWAP`, `FOR`/`NEXT`/`STEP`, `WHILE`/`WEND`,
+`IF`/`THEN`/`ELSE` nested and chained, `READ`/`DATA`/`RESTORE`, `ON GOTO` and
+`ON GOSUB`, `DEF FN`, `ON ERROR`/`RESUME` with `ERR` and `ERL`, `&H` and `&O`,
+`LIST`, `RUN`, `END`, `SYSTEM`, multi-statement lines, the screen editor and
+scrolling, and disk `SAVE`/`LOAD`/`OPEN`/`PRINT #`/`CLOSE` — the whole of
+`GIODSK` and the FCB-based DOS calls.
 
-Two things are untested rather than known-good: `IF`/`THEN`/`ELSE`, and disk
-`SAVE`/`LOAD`, which is the whole of `GIODSK` and the FCB-based DOS calls.
+All twelve BASIC programs on the MS-DOS 1.25 sample disk run: ART, BALL,
+CALENDAR, CIRCLE, COLORBAR, COMM, DONKEY, MORTGAGE, MUSIC, PIECHART, SAMPLES
+and SPACE. COMM gets as far as its menu; dialling a service needs the serial
+port, which is not implemented.
 
 One number cannot be confirmed here. `PRINT 1/3` gives `.3333334`.
 `PRINT .3333333` round-trips exactly, and `PRINT 1/3-.3333333` is
@@ -327,16 +339,36 @@ name elsewhere does not satisfy it. `TRMCOM` is exactly that case — `GIOCOM`
 imports the OEM routine while `GWSTS` has an unrelated private label — which is
 why the count is 66 rather than 65.)
 
-`GWOEM.ASM` is a reconstruction of the **text-mode part** of that layer for the
-IBM PC, written against the BIOS and the video buffer. Every contract in it is
-taken from a call site, which is cited with the routine — for example SCNDRV's
+`GWOEM.ASM` is a reconstruction of that layer for the IBM PC, written against
+the BIOS and the video buffer. Every contract in it is taken from a call site,
+which is cited with the routine — for example SCNDRV's
 `CALL SCROUT ; Send char in AX to BIOS at DX posn`, and `MOV BYTE PTR CSRY,DL /
 MOV BYTE PTR CSRX,DH` which is what establishes that DL is the row and DH the
 column, both 1-based.
 
-Implemented: `SCROUT` `SCRINP` `CLREOL` `CLRSCN` `SCROLL` `CSRDSP` `SWIDTH`
-`PRTMAP` `EDTMAP` `KEYINP` `SNDLPT` `GWINI` `GETHED` `GWTERM` `SEGINI` `SETCBF`
-`PEKFLT` `POKFLT`.
+It covers:
+
+- **Screen.** `SCROUT` `SCRINP` `CLREOL` `CLRSCN` `SCROLL` `CSRDSP` `SWIDTH`
+  `SCRSTT` `PRTMAP` `EDTMAP`, in text mode and on both CGA graphics screens.
+- **Graphics.** `MAPXYC` `SCALXY` `SETC` `READC` `STOREC` `FETCHC` `NSETCX`
+  `UPC` `DOWNC` `LEFTC` `RIGHTC` `TUPC` `TDOWNC` `PIXSIZ` `GRPSIZ` `GTASPC`,
+  `PNTINI` `SCANR` `SCANL` for `PAINT`, and `PGINIT` `NREAD` `NWRITE` for
+  `GET`/`PUT`. SCREEN 1 is 320×200 in four colours, SCREEN 2 640×200 in two.
+- **Colour.** `SETATR` `GETFBC` `SETFBC` `SETCLR` `SCRATR` `CSRATR`, over the
+  full 0–15 text range with the blink bit.
+- **Keyboard.** `KEYINP` `INKMAP` `INFMAP` `MAPSUP` `FKYADV` `FKYFMT`: the
+  arrow and editing keys, F1–F10 as soft keys, Ctrl+Left/Right/Home/End as the
+  word and line functions, and Alt+letter as the super-shift keyword expansion,
+  which `MAPSUP` resolves to the first reserved word for the letter -- Alt-A to
+  `AUTO`, as the IBM keyboard does.
+- **Sound.** `DONOTE`, through channel 2 of the timer. A background note --
+  `PLAY "MB"` -- is queued and drained by the timer tick, INT 1Ch, so the
+  program runs on while it sounds.
+- **Serial.** `INICOM` `SNDCOM` `RECCOM` `STACOM` `TRMCOM`, on the 8250.
+  Reception is interrupt driven, IRQ4 for COM1 and IRQ3 for COM2, into a ring
+  of 256 bytes per channel, which is what `LOC`, `INPUT$` and `ON COM(n)` read.
+- **The rest.** `SNDLPT` `LCPY` `POLLEV` `GWINI` `GETHED` `GWTERM` `SEGINI`
+  `SETCBF` `PEKFLT` `POKFLT`.
 
 Three of those contracts took finding, and all three are cases where the
 sources say what is needed if you look in the right place.
@@ -368,13 +400,17 @@ sources say what is needed if you look in the right place.
   commented out — but glyph 255 in the IBM character ROM is blank, so on real
   hardware nothing shows.
 
-Deliberately not implemented, and returning harmlessly: the CGA pixel
-primitives, colour and attribute handling, sound, the light pen, the joysticks
-and the serial port. `SCRSTT` refuses every screen mode, so the graphics
-primitives are unreachable. The keyboard map routines (`INKMAP`, `INFMAP`,
-`MAPSUP`, `FKYADV`, `FKYFMT`) do nothing, because their contracts are not
-established from the call sites — guessing them would be worse than leaving the
-arrow keys and function keys out.
+`POLLEV` is worth singling out, because CHKINT runs it between statements and
+everything else there is behind it -- "CALL POLLEV ;Test for occurance of
+trapable events / JZ CHKINX ;Exit - no trapable event". Answering "nothing"
+unconditionally switches off every trap in the language, `ON KEY` and `ON COM`
+alike. There is no single BIOS flag to read here, so it asks the two sources
+that exist: a byte sitting in a COM ring, and MS-DOS call 11, "console input
+status", which reports a waiting key without taking it.
+
+Not implemented, and answering as absent hardware: the light pen (`RDPEN`) and
+the joysticks (`RDSTIK`, `RDTRIG`). One routine is partial: `LCPY` prints the
+text screen but refuses a graphics one.
 
 ### Does it need a later MS-DOS?
 
@@ -392,11 +428,10 @@ destroyed", so it sets `DS` itself. `GWINIT` follows the call with
 captures the new segment instead of the program segment prefix. That corrupts
 the exit vector, not the startup.
 
-`GETHED` also clears `KEYSW`. `GWINIT` sets it to 255 just before calling
+`GETHED` leaves `KEYSW` alone. `GWINIT` sets it to 255 just before calling
 `GETHED` — "if heading is printed, display Fn keys also" — and then calls
-`SKEYON`, which walks the ten soft keys through the unimplemented `FKYFMT` and
-`FKYADV`, leaving the half-drawn `"LPT1:"` that F6 defaults to at the bottom of
-the screen. Declining the display is the honest answer while those are stubs.
+`SKEYON`, which walks the ten soft keys through `FKYFMT`, so the key line comes
+up with the heading as it does on the IBM machines.
 
 ### Debugging it
 
