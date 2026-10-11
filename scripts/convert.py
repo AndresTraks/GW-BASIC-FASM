@@ -70,8 +70,18 @@ PATCH = {
  # MASM's "ORG $-1 / LABEL / ORG $+1".  The translator drops ORG from macro
  # bodies, which left R1 textually identical to R and put MAXUPD and MINUPD one
  # byte too high; both are read by other modules.  State the offset directly.
+ # FKYFMT has to hand GETFMT a pointer GETFMT then reads through DS, so the
+ # three bytes of soft-key display format belong in GWRAM, beside the rest of
+ # the key line's state.  Nothing in the original reserved them: they are what
+ # the reconstructed OEM layer needs, and a hand edit here would be lost the
+ # next time this script ran.
  "GWRAM.ASM": [("re", r"(macro @R1 NAME,SIZE \{(?:[^}]*?))  label NAME word",
-                r"\1  NAME = $ - 1")],
+                r"\1  NAME = $ - 1"),
+               ("\t@RINIT\tACTPAG,1  ;Active page",
+                "\t@RINIT\t@FKYFMB,3  ;Soft-key display format, filled in by the OEM\n"
+                "\tDB\t6,10,1  ;  routine FKYFMT: chars/key, keys, first key.  It\n"
+                "\t;  lives here because GETFMT reads it through DS.\n"
+                "\t@RINIT\tACTPAG,1  ;Active page")],
 }
 
 def patch(name, text):
