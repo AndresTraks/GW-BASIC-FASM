@@ -2088,16 +2088,90 @@ macro MARK col, ch {
         ret
 
 ; ---------------------------------------------------------------------------
-; The rest of the OEM layer, which this text-mode reconstruction does not
-; implement.  SCRSTT refuses every screen mode, so the graphics primitives are
-; unreachable; the sound, light pen, joystick and serial entry points return
-; without doing anything.
+; The devices this machine does not have, and the screen dump.
 
+; POLLEV - GWSTS's CHKINT, which runs between statements: "CALL POLLEV ;Test
+; for occurance of trapable events / JZ CHKINX ;Exit - no trapable event".
+; Nothing here raises one, but the answer has to be given: left to the flags
+; the caller arrived with, this reports an event that never happened and sends
+; the interpreter off into the trap path.
 @POLLEV:
+        push    ax
+        xor     al, al
+        or      al, al                  ; ZF = 1: nothing has happened
+        pop     ax
+        ret
+
+; RDPEN - the PEN function, and PEN ON and OFF, which arrive as 254 and 255.
+; There is no light pen, so every question about one is answered with zero.
 @RDPEN:
+        xor     bx, bx
+        ret
+
+; RDSTIK, RDTRIG - STICK and STRIG.  Two sticks with an X and a Y each, so
+; 0 to 3 are the ones that may be asked for; GWSTS turns the carry into
+; "Illegal function call".  Nothing is plugged in, so they read as centred and
+; unpressed.
 @RDSTIK:
+        cmp     al, 4
+        jae     @@st_bad
+        xor     bx, bx
+        clc
+        ret
+@@st_bad:
+        stc
+        ret
+
 @RDTRIG:
+        xor     al, al                  ; 0/1 for not-pressed/pressed
+        ret
+
+; LCPY - the LCOPY statement, the screen to the printer, through the same DOS
+; call SNDLPT uses.  A graphics screen is refused: there are no characters on
+; it to send, and a printer that takes pixels is not something this layer can
+; find out about.
 @LCPY:
+        cmp     byte [cs:@GWOEM_GMODE], 0
+        jne     @@lc_bad
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        mov     dl, 1
+@@lc_row:
+        mov     dh, 1
+@@lc_col:
+        call    @SCRINP
+        or      al, al
+        jnz     @@lc_send
+        mov     al, " "                 ; an empty cell goes out as a space
+@@lc_send:
+        call    @SNDLPT
+        inc     dh
+        mov     al, [cs:@GWOEM_WIDTH]
+        cmp     dh, al
+        jbe     @@lc_col
+        mov     al, 13
+        call    @SNDLPT
+        mov     al, 10
+        call    @SNDLPT
+        inc     dl
+        mov     al, [cs:@GWOEM_HEIGHT]
+        cmp     dl, al
+        jbe     @@lc_row
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        clc
+        ret
+@@lc_bad:
+        stc
+        ret
+
+; The serial entry points.  There is no RS232 support here, so the open, the
+; two transfers and the status call all return without doing anything; SETCBF
+; above has already told GIOCOM that no buffer was reserved.
 @INICOM:
 @SNDCOM:
 @RECCOM:
