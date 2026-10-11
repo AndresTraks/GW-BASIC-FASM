@@ -608,6 +608,20 @@ macro MARK col, ch {
         db      79, 255, 14             ; end             LAPPND
         db      82, 255, 18             ; insert          LINSRT
         db      83, 255, 127            ; delete          CDELET, via CTLNDL
+        db      115, 255, 2             ; Ctrl+left       BCKWRD
+        db      116, 255, 6             ; Ctrl+right      FWDWRD
+        db      117, 255, 5             ; Ctrl+end        LTRUNC
+        db      119, 255, 12            ; Ctrl+home       CCLRSN
+; Alt+<letter> is the super shift.  CHKFKY tests (128, n) for a soft key first,
+; finds n is a letter rather than 32 upwards, and sends it to MAPSUP to be
+; expanded into a reserved word -- Alt-A into AUTO.  The scan code on the left
+; is the letter's own, which is what the keyboard driver reports for Alt.
+        db      16,128,'Q',  17,128,'W',  18,128,'E',  19,128,'R',  20,128,'T'
+        db      21,128,'Y',  22,128,'U',  23,128,'I',  24,128,'O',  25,128,'P'
+        db      30,128,'A',  31,128,'S',  32,128,'D',  33,128,'F',  34,128,'G'
+        db      35,128,'H',  36,128,'J',  37,128,'K',  38,128,'L'
+        db      44,128,'Z',  45,128,'X',  46,128,'C',  47,128,'V',  48,128,'B'
+        db      49,128,'N',  50,128,'M'
 @GWOEM_KEYTABN = ($ - @GWOEM_KEYTAB) / 3
 
 ; INKMAP - GIOKYB's INKEY: "CALL INKMAP ;OEM map routine for INKEY$ / JZ INKGET
@@ -626,6 +640,10 @@ macro MARK col, ch {
         ret                             ; a character: pass it through unchanged
 @@ik_fun:
         popf
+        cmp     al, 32                  ; 32 upwards is a soft key; anything
+        jb      @@ik_look               ;  else is a super shift, and its scan
+        cmp     al, 32 + @NMKEYF        ;  code comes from the table like a
+        jae     @@ik_look               ;  control function's does.
         add     al, 59 - 32             ; soft key n back to its scan code
         xor     ah, ah
         or      ax, ax                  ; ZF = 0 ...
@@ -633,18 +651,22 @@ macro MARK col, ch {
         ret
 @@ik_ctl:
         popf
+@@ik_look:
         push    cx
         push    si
         mov     si, @GWOEM_KEYTAB
         mov     cx, @GWOEM_KEYTABN
 @@ik_scan:
         cmp     al, [cs:si+2]
+        jne     @@ik_next
+        cmp     ah, [cs:si+1]
         je      @@ik_found
+@@ik_next:
         add     si, 3
         loop    @@ik_scan
         pop     si
         pop     cx
-        cmp     al, 21                  ; the ESC that became "delete line"
+        cmp     ax, 0FF00h + 21         ; the ESC that became "delete line"
         jne     @@ik_drop
         mov     ax, 27
         or      ax, ax                  ; one byte, ZF = 0, CF = 0
@@ -697,10 +719,20 @@ macro MARK col, ch {
 
 ; FKYADV - GWSTS: called when KEYSW changes to ON, and SCNDRV: "If KEYSW was
 ; 0(ZF=0) then init PF start key".  The display here always starts at key 1, so
-; there is no start key to move.  MAPSUP, the super-shift mapping, has no
-; contract to take from the call site and does nothing.
-@MAPSUP:
+; there is no start key to move.
 @FKYADV:
+        ret
+
+; MAPSUP - GIOKYB's SUPRKY: "CALL MAPSUP ;Map super shift key to letter in AL
+; and count in CH", then "XOR CL,CL / JCXZ SUPKY9 ;Request to inhibit SKey
+; expansion" and "SUB AL,'A'".  So AL arrives holding the letter and stays as
+; it is; the count picks which of the reserved words starting with that letter
+; to expand, and zero refuses to expand anything.
+;
+; One, the first word in the letter's IBMRES table, is what the IBM keyboard
+; does: ATAB opens with AUTO, BTAB with BSAVE, CTAB with COLOR.
+@MAPSUP:
+        mov     ch, 1
         ret
 
 ; SNDLPT - GIOLPT: "Call OEM routine to output to printer", character in AL.
