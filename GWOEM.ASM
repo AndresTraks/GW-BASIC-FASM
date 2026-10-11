@@ -1856,15 +1856,233 @@ macro MARK col, ch {
         pop     ax
         ret
 
+
+; ---------------------------------------------------------------------------
+; GET and PUT.  ADVGRP works out the rectangle and the array, writes the width
+; in bits and the number of lines into the first four bytes, and then calls
+; PGINIT once and NREAD or NWRITE for each line, moving down between them.  It
+; rounds the width up to a byte -- "Round to byte boundry ... NOW CALC NO. OF
+; BYTES PER SCAN LINE" -- so every line starts on one.
+
+@GWOEM_PGBITS dw 0                      ; bits across a line of the image
+@GWOEM_PGPTR  dw 0                      ; where the next byte goes or comes from
+@GWOEM_PGACT  db 0                      ; 0 OR, 1 AND, 2 PRESET, 3 PSET, 4 XOR
+@GWOEM_PGACC  db 0                      ; the byte being filled or emptied
+@GWOEM_PGCNT  db 0                      ; how many of its bits are in hand
+@GWOEM_PGSRC  db 0                      ; one pixel out of the image
+
+; The value in AL at the current C, which is SETC without ATRBYT.
+@GWOEM_PUTPX:
+        push    ax
+        push    bx
+        push    es
+        and     al, [cs:@GWOEM_GAMSK]
+        mul     byte [cs:@GWOEM_GREP]
+        mov     ah, [cs:@GWOEM_CMSK]
+        and     al, ah
+        not     ah
+        mov     es, [cs:@GWOEM_VSEG]
+        mov     bx, [cs:@GWOEM_CADR]
+        and     ah, [es:bx]
+        or      al, ah
+        mov     [es:bx], al
+        pop     es
+        pop     bx
+        pop     ax
+        ret
+
+; PGINIT - "[BC]=BIT COUNT,[HL]=ARRAY ADDR", AL the PUT option, and the carry
+; telling a PUT from a GET.  Which of the two follows is in PUTFLG, so all this
+; has to do is remember where and how wide.
+@PGINIT:
+        mov     [cs:@GWOEM_PGBITS], cx
+        mov     [cs:@GWOEM_PGPTR], bx
+        mov     [cs:@GWOEM_PGACT], al
+        mov     byte [cs:@GWOEM_PGACC], 0
+        mov     byte [cs:@GWOEM_PGCNT], 0
+        ret
+
+@GWOEM_PGSTO:                           ; the filled byte, into the array
+        push    ax
+        push    bx
+        mov     bx, [cs:@GWOEM_PGPTR]
+        mov     al, [cs:@GWOEM_PGACC]
+        mov     [bx], al
+        inc     word [cs:@GWOEM_PGPTR]
+        mov     byte [cs:@GWOEM_PGACC], 0
+        mov     byte [cs:@GWOEM_PGCNT], 0
+        pop     bx
+        pop     ax
+        ret
+
+@GWOEM_PGFET:                           ; and the next one out of it
+        push    ax
+        push    bx
+        mov     bx, [cs:@GWOEM_PGPTR]
+        mov     al, [bx]
+        mov     [cs:@GWOEM_PGACC], al
+        inc     word [cs:@GWOEM_PGPTR]
+        mov     byte [cs:@GWOEM_PGCNT], 8
+        pop     bx
+        pop     ax
+        ret
+
+; One pixel of the image, in AL, against what is already on the screen.
+@GWOEM_PGCOMB:
+        push    ax
+        push    bx
+        mov     [cs:@GWOEM_PGSRC], al
+        mov     bl, [cs:@GWOEM_PGACT]
+        cmp     bl, 3
+        je      @@pc_put                ; PSET takes the image as it is
+        cmp     bl, 2
+        jne     @@pc_read
+        mov     al, [cs:@GWOEM_PGSRC]   ; PRESET takes it inverted
+        not     al
+        mov     [cs:@GWOEM_PGSRC], al
+        jmp     @@pc_put
+@@pc_read:
+        call    @READC
+        mov     bh, al
+        mov     al, [cs:@GWOEM_PGSRC]
+        or      bl, bl
+        jnz     @@pc_and
+        or      al, bh
+        jmp     @@pc_save
+@@pc_and:
+        cmp     bl, 1
+        jne     @@pc_xor
+        and     al, bh
+        jmp     @@pc_save
+@@pc_xor:
+        xor     al, bh
+@@pc_save:
+        mov     [cs:@GWOEM_PGSRC], al
+@@pc_put:
+        mov     al, [cs:@GWOEM_PGSRC]
+        call    @GWOEM_PUTPX
+        pop     bx
+        pop     ax
+        ret
+
+; NREAD - one line of the screen into the array, the leftmost pixel in the top
+; bits of the first byte.  The C goes back to where the line started, because
+; the caller moves down from there.
+@NREAD:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        call    @FETCHC
+        push    bx
+        push    ax
+        mov     ax, [cs:@GWOEM_PGBITS]
+        mov     cl, [cs:@GWOEM_GBPP]
+        dec     cl
+        shr     ax, cl                  ; bits across, over bits a pixel
+        mov     cx, ax
+        mov     byte [cs:@GWOEM_PGACC], 0
+        mov     byte [cs:@GWOEM_PGCNT], 0
+        jcxz    @@nr_flush
+@@nr_loop:
+        call    @READC
+        mov     ah, al
+        mov     al, [cs:@GWOEM_PGACC]
+        push    cx
+        mov     cl, [cs:@GWOEM_GBPP]
+        shl     al, cl
+        pop     cx
+        or      al, ah
+        mov     [cs:@GWOEM_PGACC], al
+        mov     al, [cs:@GWOEM_GBPP]
+        add     [cs:@GWOEM_PGCNT], al
+        cmp     byte [cs:@GWOEM_PGCNT], 8
+        jb      @@nr_next
+        call    @GWOEM_PGSTO
+@@nr_next:
+        call    @GWOEM_GATRT
+        jc      @@nr_edge
+        call    @RIGHTC
+@@nr_edge:
+        loop    @@nr_loop
+@@nr_flush:
+        cmp     byte [cs:@GWOEM_PGCNT], 0
+        je      @@nr_done
+        mov     al, [cs:@GWOEM_PGACC]   ; push the tail up to the top of a byte
+        push    cx
+        mov     cl, 8
+        sub     cl, [cs:@GWOEM_PGCNT]
+        shl     al, cl
+        pop     cx
+        mov     [cs:@GWOEM_PGACC], al
+        call    @GWOEM_PGSTO
+@@nr_done:
+        pop     ax
+        pop     bx
+        call    @STOREC
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+; NWRITE - and one line back out of it.
+@NWRITE:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        call    @FETCHC
+        push    bx
+        push    ax
+        mov     ax, [cs:@GWOEM_PGBITS]
+        mov     cl, [cs:@GWOEM_GBPP]
+        dec     cl
+        shr     ax, cl
+        mov     cx, ax
+        mov     byte [cs:@GWOEM_PGCNT], 0
+        jcxz    @@nw_done
+@@nw_loop:
+        cmp     byte [cs:@GWOEM_PGCNT], 0
+        jnz     @@nw_have
+        call    @GWOEM_PGFET
+@@nw_have:
+        mov     al, [cs:@GWOEM_PGACC]
+        push    cx
+        mov     cl, 8
+        sub     cl, [cs:@GWOEM_GBPP]
+        mov     ah, al
+        shr     ah, cl                  ; the pixel at the top of the byte
+        mov     cl, [cs:@GWOEM_GBPP]
+        shl     al, cl                  ; and the rest shifted up behind it
+        pop     cx
+        mov     [cs:@GWOEM_PGACC], al
+        mov     al, [cs:@GWOEM_GBPP]
+        sub     [cs:@GWOEM_PGCNT], al
+        mov     al, ah
+        and     al, [cs:@GWOEM_GAMSK]
+        call    @GWOEM_PGCOMB
+        call    @GWOEM_GATRT
+        jc      @@nw_edge
+        call    @RIGHTC
+@@nw_edge:
+        loop    @@nw_loop
+@@nw_done:
+        pop     ax
+        pop     bx
+        call    @STOREC
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
 ; ---------------------------------------------------------------------------
 ; The rest of the OEM layer, which this text-mode reconstruction does not
 ; implement.  SCRSTT refuses every screen mode, so the graphics primitives are
 ; unreachable; the sound, light pen, joystick and serial entry points return
 ; without doing anything.
 
-@NREAD:
-@NWRITE:
-@PGINIT:
 @POLLEV:
 @RDPEN:
 @RDSTIK:
