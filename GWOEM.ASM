@@ -2147,14 +2147,50 @@ macro MARK col, ch {
 ; The devices this machine does not have, and the screen dump.
 
 ; POLLEV - GWSTS's CHKINT, which runs between statements: "CALL POLLEV ;Test
-; for occurance of trapable events / JZ CHKINX ;Exit - no trapable event".
-; Nothing here raises one, but the answer has to be given: left to the flags
-; the caller arrived with, this reports an event that never happened and sends
-; the interpreter off into the trap path.
+; for occurance of trapable events / JZ CHKINX ;Exit - no trapable event", and
+; above it "For efficiency, it calls POLLEV which looks at flag which gets set
+; by BIOS when some interrupt occurs".
+;
+; This gates everything CHKINT does -- POLKEY for the function keys and Ctl-C,
+; POLCOM for ON COM, POLPEN and POLSTR -- so answering "nothing" unconditionally
+; switches off every trap in the language.  There is no one BIOS flag to look
+; at here, so the two sources that exist are asked directly: a byte sitting in
+; a COM ring, which costs a compare, and a key waiting, which costs MS-DOS
+; call 11, "console input status".  That one does not take the key, which is
+; what makes it usable here -- POLKEY takes it afterwards through KEYINP.
 @POLLEV:
         push    ax
-        xor     al, al
-        or      al, al                  ; ZF = 1: nothing has happened
+        push    bx
+        push    cx
+        push    dx
+        push    si
+        push    di
+        mov     ax, [cs:@GWOEM_CMHD]
+        cmp     ax, [cs:@GWOEM_CMTL]
+        jne     @@pe_yes
+        mov     ax, [cs:@GWOEM_CMHD+2]
+        cmp     ax, [cs:@GWOEM_CMTL+2]
+        jne     @@pe_yes
+        mov     ah, 11
+        int     21h
+        or      al, al
+        jz      @@pe_no
+@@pe_yes:
+        or      sp, sp                  ; SP is never zero, so ZF = 0: look
+        pop     di                      ;  (POP leaves the flags alone)
+        pop     si
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+@@pe_no:
+        cmp     sp, sp                  ; ZF = 1: nothing is waiting
+        pop     di
+        pop     si
+        pop     dx
+        pop     cx
+        pop     bx
         pop     ax
         ret
 
@@ -2225,33 +2261,507 @@ macro MARK col, ch {
         stc
         ret
 
-; The serial entry points.  There is no RS232 support here, and GIOCOM reads
-; the answer out of AH: 255 is "Illegal Filename", 0 is no error, and 1 to 5
-; index CMERRT, where 3 is a device timeout.  OPEN "COM1:" is answered with
-; that -- a port with nothing behind it does time out -- so the statement is
-; refused the same way every time.  Left to return on the flags it was called
-; with, which error came back depended on what the caller had been doing.
+; ---------------------------------------------------------------------------
+; The serial port, on the 8250 the IBM PC's asynchronous adapter carries.
 ;
-; SETCBF above has already told GIOCOM that no buffer was reserved, and
-; nothing gets past the open, but the rest answer for themselves rather than
-; leave it to chance.
+; GIOCOM lays out the device control block INICOM is handed; every other
+; routine takes only the channel number, in AH:
+;
+;   _DEVID=0  channel, 0..n          _CMFLG=12  attributes, of which this
+;   _BAUDR=1  baud rate, a word                 layer reads _CMRTS=2,
+;   _BYTSZ=3  bits per byte, 4..8               "Suppress Request-To-Send"
+;   _PARIT=4  0..4 = none, odd, even, mark, space
+;   _STOPB=5  0..2 = 1, 1.5, 2 stop bits
+;   _RLSTO=6  _CTSTO=8  _DSRTO=10, timeouts in milliseconds, of which the DCB
+;             itself says "Support of Timeout Flags by BIOS is optional"
+;
+; Errors come back in AH and GIOCOM's CMERRT maps them: 1 is a buffer
+; overflow, 2 a parity error, 3 to 5 a device timeout, anything else a device
+; I/O error, and 255, out of INICOM alone, is Illegal Filename.
+;
+; The receive queue belongs to this layer, not to BASIC.  POLCOM asks STACOM
+; for "[DX]=number of bytes queued" at the start of every statement -- that is
+; what makes ON COM(n) fire -- and COMSIN spins on RECCOM until a byte is
+; "ready to be read".  So reception is interrupt driven, IRQ4 for COM1 and
+; IRQ3 for COM2, and the bytes wait in a ring here.
+@GWOEM_CMRSZ  = 256                     ; ring bytes per channel, a power of 2
+@GWOEM_CMBASE dw 0, 0                   ; port base, 0 when the channel is shut
+@GWOEM_CMHD   dw 0, 0                   ; the ring, read at the head and
+@GWOEM_CMTL   dw 0, 0                   ;  written at the tail
+@GWOEM_CMERR  db 0, 0                   ; sticky error, cleared when reported
+@GWOEM_CMVEC  dw 0, 0, 0, 0             ; the IRQ vectors this layer displaced
+@GWOEM_CMRING db 2*@GWOEM_CMRSZ dup (0)
+
+; INICOM - GIOCOM's COMOPN: "MOV BX,DI / CALL INICOM ;call machine dependent
+; OPEN routine / ;destroys FLAGS, AX..DX / INC AH / JE ERIFN1 ;branch if
+; Illegal Filename / DEC AH / CALL CKCMER ;see if INICOM didn't like options".
+; BX points at the control block.
 @INICOM:
-        mov     ah, 3
+        push    bx
+        push    si
+        push    di
+        push    bp
+        push    ds
+        mov     al, [bx+0]              ; _DEVID, the channel
+        xor     ah, ah
+        cmp     al, 2
+        jae     @@ic_name
+        mov     si, ax
+        add     si, si                  ; SI = this channel's word index
+
+        push    es                      ; through ES, because DS still has to
+        mov     ax, 40h                 ;  address the control block BX points
+        mov     es, ax                  ;  into
+        mov     cx, [es:si]             ; the BIOS keeps the port bases at 40:0
+        pop     es
+        or      cx, cx
+        jz      @@ic_gone               ; no adapter answers for that channel
+
+        mov     ax, [bx+1]              ; _BAUDR; "0=disable device"
+        or      ax, ax
+        jz      @@ic_name
+        mov     bp, ax
+        mov     dx, 1
+        mov     ax, 0C200h              ; 115200, the 8250's clock divided by 16
+        div     bp
+        or      dx, dx
+        jnz     @@ic_name               ; not a rate the divisor can express
+        or      ax, ax
+        jz      @@ic_name
+        mov     bp, ax                  ; BP = the divisor
+
+        mov     al, [bx+3]              ; _BYTSZ
+        xor     ah, ah
+        sub     al, 5
+        cmp     al, 3
+        ja      @@ic_name
+        mov     di, ax                  ; DI = the line control byte, bits 0-1
+        cmp     byte [bx+5], 0          ; _STOPB: one stop bit, or more than
+        je      @@ic_stop               ;  one, which is the only other thing
+        or      di, 4                   ;  the 8250 can be told
+@@ic_stop:
+        mov     al, [bx+4]              ; _PARIT
+        cmp     al, 4
+        ja      @@ic_name
+        or      al, al
+        jz      @@ic_prog               ; none: bits 3-5 stay clear
+        mov     ah, al
+        mov     al, 8                   ; 1 = odd
+        cmp     ah, 1
+        je      @@ic_par
+        mov     al, 18h                 ; 2 = even
+        cmp     ah, 2
+        je      @@ic_par
+        mov     al, 28h                 ; 3 = mark
+        cmp     ah, 3
+        je      @@ic_par
+        mov     al, 38h                 ; 4 = space
+@@ic_par:
+        xor     ah, ah
+        or      di, ax
+
+@@ic_prog:
+        mov     dx, cx
+        add     dx, 3
+        mov     ax, di
+        or      al, 80h                 ; DLAB, so the divisor shows at +0, +1
+        out     dx, al
+        mov     dx, cx
+        mov     ax, bp
+        out     dx, al                  ; divisor, low byte
+        inc     dx
+        mov     al, ah
+        out     dx, al                  ;  and high
+        mov     dx, cx
+        add     dx, 3
+        mov     ax, di
+        out     dx, al                  ; and now the word format itself
+        mov     dx, cx
+        add     dx, 2
+        xor     al, al
+        out     dx, al                  ; no FIFO, so a 16550 acts as an 8250
+        inc     dx
+        inc     dx
+        mov     al, 9                   ; DTR, and OUT2 -- which is what puts
+        test    byte [bx+12], 2         ;  the chip's interrupt on the bus at
+        jnz     @@ic_mcr                ;  all.  _CMRTS suppresses RTS.
+        or      al, 2
+@@ic_mcr:
+        out     dx, al
+        mov     dx, cx
+        add     dx, 5
+        in      al, dx                  ; clear the status, and take any stale
+        mov     dx, cx                  ;  byte, so the first interrupt is a
+        in      al, dx                  ;  real one
+        mov     dx, cx
+        inc     dx
+        mov     al, 1
+        out     dx, al                  ; interrupt when a byte has arrived
+
+        mov     word [cs:@GWOEM_CMHD+si], 0
+        mov     word [cs:@GWOEM_CMTL+si], 0
+        mov     [cs:@GWOEM_CMBASE+si], cx
+        mov     di, si
+        shr     di, 1                   ; DI = the unit
+        mov     byte [cs:@GWOEM_CMERR+di], 0
+        call    @GWOEM_CMHOOK
+        xor     ah, ah
+        jmp     @@ic_done
+@@ic_name:
+        mov     ah, 255                 ; "Illegal Filename"
+        jmp     @@ic_done
+@@ic_gone:
+        mov     ah, 6                   ; nothing there: a device I/O error
+@@ic_done:
+        pop     ds
+        pop     bp
+        pop     di
+        pop     si
+        pop     bx
         ret
 
-@SNDCOM:
+; TRMCOM - GIOCOM's COMCLS: "MOV AH,[_DEVID+DI] ;[AH]=device ID / CALL TRMCOM
+; ;terminate COM channel / JMP CKCMER".
 @TRMCOM:
+        push    bx
+        push    cx
+        push    dx
+        push    si
+        push    di
+        mov     al, ah
         xor     ah, ah
+        cmp     al, 2
+        jae     @@tm_done
+        mov     di, ax
+        mov     si, ax
+        add     si, si
+        mov     dx, [cs:@GWOEM_CMBASE+si]
+        or      dx, dx
+        jz      @@tm_done               ; not open: nothing to undo
+        mov     word [cs:@GWOEM_CMBASE+si], 0
+        inc     dx
+        xor     al, al
+        out     dx, al                  ; the chip stops interrupting
+        add     dx, 3
+        out     dx, al                  ;  and drops DTR, RTS and OUT2
+        call    @GWOEM_CMFREE
+@@tm_done:
+        xor     ah, ah
+        pop     di
+        pop     si
+        pop     dx
+        pop     cx
+        pop     bx
         ret
 
+; SNDCOM - GIOCOM's CMROUT: "MOV AH,[_DEVID+DI] / PUSH AX / CALL SNDCOM
+; ;output [AL] to COM and return / CALL CKCMER / POP AX".
+@SNDCOM:
+        push    bx
+        push    cx
+        push    dx
+        push    si
+        mov     bl, ah
+        xor     bh, bh
+        cmp     bl, 2
+        jae     @@sc_shut
+        mov     si, bx
+        add     si, si
+        mov     dx, [cs:@GWOEM_CMBASE+si]
+        or      dx, dx
+        jz      @@sc_shut
+        mov     bx, dx
+        add     dx, 5                   ; the line status register
+        push    ax
+        mov     si, 4                   ; about a second and a half of waiting
+@@sc_outer:
+        xor     cx, cx
+@@sc_wait:
+        in      al, dx
+        test    al, 20h                 ; is the holding register empty?
+        jnz     @@sc_send
+        loop    @@sc_wait
+        dec     si
+        jnz     @@sc_outer
+        pop     ax
+        mov     ah, 3                   ; "device timeout"
+        jmp     @@sc_out
+@@sc_send:
+        pop     ax
+        mov     dx, bx
+        out     dx, al
+        xor     ah, ah
+        jmp     @@sc_out
+@@sc_shut:
+        mov     ah, 3
+@@sc_out:
+        pop     si
+        pop     dx
+        pop     cx
+        pop     bx
+        ret
+
+; RECCOM - GIOCOM's COMSIN: "MOV AH,AL ;[AH]=Com Unit ID(DI) / CALL RECCOM
+; ;[AL]=input byte (if data is ready) / PUSHF / CALL CKCMER / POPF / JNZ
+; CSGOT1 ;wait if none ready to be read".  So the zero flag clear means a byte
+; came back, which has to hold for a byte of zero too.
 @RECCOM:
-        xor     ax, ax                  ; no error, and nothing to read
+        push    bx
+        push    cx
+        push    si
+        mov     bl, ah
+        xor     bh, bh
+        cmp     bl, 2
+        jae     @@rc_none
+        mov     si, bx
+        add     si, si
+        cli
+        mov     cx, [cs:@GWOEM_CMHD+si]
+        cmp     cx, [cs:@GWOEM_CMTL+si]
+        je      @@rc_empty
+        push    bx
+        mov     bh, bl                  ; BX = unit * 256, this ring's base
+        xor     bl, bl
+        add     bx, cx
+        mov     al, [cs:@GWOEM_CMRING+bx]
+        pop     bx
+        inc     cx
+        and     cx, @GWOEM_CMRSZ-1
+        mov     [cs:@GWOEM_CMHD+si], cx
+        sti
+        mov     ah, [cs:@GWOEM_CMERR+bx]
+        mov     byte [cs:@GWOEM_CMERR+bx], 0
+        pop     si
+        pop     cx
+        pop     bx
+        or      sp, sp                  ; SP is never zero, so ZF = 0: a byte
+        ret
+@@rc_empty:
+        sti
+        mov     ah, [cs:@GWOEM_CMERR+bx]
+        mov     byte [cs:@GWOEM_CMERR+bx], 0
+        pop     si
+        pop     cx
+        pop     bx
+        cmp     al, al                  ; ZF = 1: nothing is ready
+        ret
+@@rc_none:
+        pop     si
+        pop     cx
+        pop     bx
+        xor     ax, ax
+        cmp     al, al
         ret
 
+; STACOM - GIOCOM's GCOMSZ: "On entry: AH = unit number / On return: DX=bytes
+; in queue / CX=free bytes in queue / Does error processing if gets error from
+; COM channel", and the caller tests AH for that error before anything else.
 @STACOM:
+        push    bx
+        push    si
+        mov     bl, ah
+        xor     bh, bh
+        cmp     bl, 2
+        jae     @@st_none
+        mov     si, bx
+        add     si, si
+        cli
+        mov     dx, [cs:@GWOEM_CMTL+si]
+        sub     dx, [cs:@GWOEM_CMHD+si]
+        sti
+        and     dx, @GWOEM_CMRSZ-1      ; bytes queued, the wrap included
+        mov     cx, @GWOEM_CMRSZ-1
+        sub     cx, dx                  ; and what is left of the ring
+        mov     ah, [cs:@GWOEM_CMERR+bx]
+        mov     byte [cs:@GWOEM_CMERR+bx], 0
+        pop     si
+        pop     bx
+        ret
+@@st_none:
         xor     ah, ah
-        xor     cx, cx                  ; nothing queued, and no room for more
+        xor     cx, cx
         xor     dx, dx
+        pop     si
+        pop     bx
+        ret
+
+; Append AL to the ring of the unit in BL, dropping it and recording an
+; overflow if there is no room.  Saves every register.
+@GWOEM_CMPUT:
+        push    ax
+        push    bx
+        push    cx
+        push    si
+        push    di
+        mov     si, bx
+        add     si, si
+        mov     di, [cs:@GWOEM_CMTL+si]
+        mov     cx, di
+        inc     cx
+        and     cx, @GWOEM_CMRSZ-1
+        cmp     cx, [cs:@GWOEM_CMHD+si]
+        je      @@cp_full
+        mov     bh, bl                  ; BX = unit * 256, this ring's base
+        xor     bl, bl
+        add     di, bx
+        mov     [cs:@GWOEM_CMRING+di], al
+        mov     [cs:@GWOEM_CMTL+si], cx
+        jmp     @@cp_done
+@@cp_full:
+        mov     byte [cs:@GWOEM_CMERR+bx], 1    ; "buffer overflow error"
+@@cp_done:
+        pop     di
+        pop     si
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+; IRQ4 (COM1) and IRQ3 (COM2).  Everything that has arrived goes into the
+; ring; a line error is remembered for whichever of RECCOM or STACOM reports
+; next, which is what GIOCOM's "Does error processing if gets error from COM
+; channel" expects to find.
+@GWOEM_CMI0:
+        push    ax
+        xor     al, al
+        jmp     @GWOEM_CMISR
+@GWOEM_CMI1:
+        push    ax
+        mov     al, 1
+@GWOEM_CMISR:
+        push    bx
+        push    cx
+        push    dx
+        push    si
+        mov     bl, al
+        xor     bh, bh
+        mov     si, bx
+        add     si, si
+        mov     cx, [cs:@GWOEM_CMBASE+si]
+        or      cx, cx
+        jz      @@ci_eoi
+@@ci_poll:
+        mov     dx, cx
+        add     dx, 5                   ; the line status register
+        in      al, dx
+        test    al, 1                   ; is a byte waiting?
+        jz      @@ci_eoi
+        test    al, 1Ah                 ; overrun, parity or framing
+        jz      @@ci_read
+        mov     ah, 1                   ; overrun: "buffer overflow error"
+        test    al, 2
+        jnz     @@ci_note
+        mov     ah, 2                   ; parity or framing: "parity error"
+@@ci_note:
+        mov     [cs:@GWOEM_CMERR+bx], ah
+@@ci_read:
+        mov     dx, cx
+        in      al, dx                  ; the byte, which clears the chip
+        call    @GWOEM_CMPUT
+        jmp     @@ci_poll
+@@ci_eoi:
+        mov     al, 20h
+        out     20h, al                 ; end of interrupt
+        pop     si
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        iret
+
+; Take over the channel's IRQ and let it through the interrupt controller,
+; which starts out masking both.  DI = the unit.
+@GWOEM_CMHOOK:
+        push    ax
+        push    bx
+        push    cx
+        push    dx
+        push    si
+        push    ds
+        mov     si, di
+        add     si, si
+        add     si, si                  ; SI = the slot for the old vector
+        mov     bx, 0Ch*4               ; IRQ4, COM1
+        mov     cl, 10h
+        mov     dx, @GWOEM_CMI0
+        or      di, di
+        jz      @@ch_set
+        mov     bx, 0Bh*4               ; IRQ3, COM2
+        mov     cl, 8
+        mov     dx, @GWOEM_CMI1
+@@ch_set:
+        xor     ax, ax
+        mov     ds, ax
+        cli
+        mov     ax, [bx]
+        mov     [cs:@GWOEM_CMVEC+si], ax
+        mov     ax, [bx+2]
+        mov     [cs:@GWOEM_CMVEC+si+2], ax
+        mov     [bx], dx
+        mov     [bx+2], cs
+        in      al, 21h
+        not     cl
+        and     al, cl
+        out     21h, al
+        sti
+        pop     ds
+        pop     si
+        pop     dx
+        pop     cx
+        pop     bx
+        pop     ax
+        ret
+
+; Shut a channel down if it is still open.  DI = the unit.
+@GWOEM_CMSHUT:
+        push    ax
+        push    si
+        mov     si, di
+        add     si, si
+        cmp     word [cs:@GWOEM_CMBASE+si], 0
+        je      @@cs_done
+        mov     ax, di
+        mov     ah, al                  ; TRMCOM takes the unit in AH
+        call    @TRMCOM
+@@cs_done:
+        pop     si
+        pop     ax
+        ret
+
+; And give it back.  DI = the unit.  Leaving the vector pointing in here would
+; aim the next interrupt at whatever DOS loads over this program.
+@GWOEM_CMFREE:
+        push    ax
+        push    bx
+        push    cx
+        push    si
+        push    ds
+        mov     si, di
+        add     si, si
+        add     si, si
+        mov     bx, 0Ch*4
+        mov     cl, 10h
+        or      di, di
+        jz      @@cf_set
+        mov     bx, 0Bh*4
+        mov     cl, 8
+@@cf_set:
+        xor     ax, ax
+        mov     ds, ax
+        cli
+        in      al, 21h
+        or      al, cl                  ; mask it again
+        out     21h, al
+        mov     ax, [cs:@GWOEM_CMVEC+si]
+        mov     [bx], ax
+        mov     ax, [cs:@GWOEM_CMVEC+si+2]
+        mov     [bx+2], ax
+        sti
+        pop     ds
+        pop     si
+        pop     cx
+        pop     bx
+        pop     ax
         ret
 
 end if
