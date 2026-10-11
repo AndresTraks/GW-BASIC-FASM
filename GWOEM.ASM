@@ -965,6 +965,8 @@ macro MARK col, ch {
         mov     byte [cs:@GWOEM_GREP], 055h
         mov     byte [cs:@GWOEM_GAMSK], 3
         mov     byte [cs:@GWOEM_GLASTM], 3
+        mov     byte [cs:@GWOEM_FORE], 3     ; the default a statement draws in
+        mov     byte [cs:@GWOEM_BACK], 0
         mov     word [cs:@GWOEM_GMAXX], 319
         mov     word [cs:@GWOEM_GASP], 213      ; five sixths, in 256ths
         mov     byte [cs:@GWOEM_WIDTH], 40
@@ -977,6 +979,8 @@ macro MARK col, ch {
         mov     byte [cs:@GWOEM_GREP], 0FFh
         mov     byte [cs:@GWOEM_GAMSK], 1
         mov     byte [cs:@GWOEM_GLASTM], 1
+        mov     byte [cs:@GWOEM_FORE], 1     ; the default a statement draws in
+        mov     byte [cs:@GWOEM_BACK], 0
         mov     word [cs:@GWOEM_GMAXX], 639
         mov     word [cs:@GWOEM_GASP], 107      ; five twelfths
         mov     byte [cs:@GWOEM_WIDTH], 80
@@ -1330,6 +1334,12 @@ macro MARK col, ch {
         and     bl, 7
         pop     cx
         ret
+; On a graphics screen these are attributes, not colours.  PRESET with no
+; attribute of its own draws in the background one -- GENGRP: "STC ;Flag to get
+; graphics colors / CALL GETFBC / MOV AL,BL ;Get background color" -- and that
+; is palette entry 0, not whichever of the sixteen COLOR last asked the screen
+; to show.  Handing back the latter is an attribute SETATR refuses, and DONKEY,
+; which PRESETs the donkey's eyes, stops on it.
 @@gf_graph:
         mov     al, [cs:@GWOEM_FORE]
         mov     bl, [cs:@GWOEM_BACK]
@@ -1360,6 +1370,13 @@ macro MARK col, ch {
 ; screen that is foreground, background and a border this layer has nowhere to
 ; put; on SCREEN 1 it is the background and the palette, both of which the BIOS
 ; sets; SCREEN 2 has two fixed colours and takes none of it.
+;
+; The background runs 0 to 15 here, not 0 to 7.  IBM's own COLORBAR sample asks
+; for "COLOR I+8,I+8" to draw its second row of bars, the bright half of the
+; sixteen, and refusing that is an Illegal function call in the middle of a
+; program that shipped on this disk.  The attribute keeps three bits for it,
+; so the light half lands on the dark one; the foreground carries the colour
+; that the bar is actually drawn in.
 @SETCLR:
         push    ax
         push    bx
@@ -1382,9 +1399,16 @@ macro MARK col, ch {
         mov     al, [si+1]
         cmp     al, 32
         jae     @@cl_bad
+        mov     ah, al                  ; 16 and up is the same colour, blinking
+        and     ah, 10h
+        push    cx
+        mov     cl, 3
+        shl     ah, cl
+        pop     cx                      ; ... which is bit 7 of the attribute
         and     al, 0Fh
+        or      al, ah
         mov     bl, [cs:@GWOEM_ATTR]
-        and     bl, 0F0h
+        and     bl, 70h
         or      al, bl
         mov     [cs:@GWOEM_ATTR], al
 @@cl_back:
@@ -1397,12 +1421,13 @@ macro MARK col, ch {
         cmp     byte [si], 0
         je      @@cl_ok
         mov     al, [si+1]
-        cmp     al, 8
+        cmp     al, 16
         jae     @@cl_bad
+        and     al, 7                   ; three bits is all the hardware has
         mov     cl, 4
         shl     al, cl
         mov     bl, [cs:@GWOEM_ATTR]
-        and     bl, 0Fh
+        and     bl, 8Fh
         or      al, bl
         mov     [cs:@GWOEM_ATTR], al
         jmp     @@cl_ok
@@ -1412,9 +1437,8 @@ macro MARK col, ch {
         mov     al, [si+1]
         cmp     al, 16
         jae     @@cl_bad
-        mov     [cs:@GWOEM_BACK], al
-        mov     bl, al
-        xor     bh, bh                  ; the background, and the border with it
+        mov     bl, al                  ; one of the sixteen the screen can show,
+        xor     bh, bh                  ;  which is not an attribute to draw in
         mov     ah, 0Bh
         int     10h
 @@cl_pal:
@@ -2169,14 +2193,33 @@ macro MARK col, ch {
         stc
         ret
 
-; The serial entry points.  There is no RS232 support here, so the open, the
-; two transfers and the status call all return without doing anything; SETCBF
-; above has already told GIOCOM that no buffer was reserved.
+; The serial entry points.  There is no RS232 support here, and GIOCOM reads
+; the answer out of AH: 255 is "Illegal Filename", 0 is no error, and 1 to 5
+; index CMERRT, where 3 is a device timeout.  OPEN "COM1:" is answered with
+; that -- a port with nothing behind it does time out -- so the statement is
+; refused the same way every time.  Left to return on the flags it was called
+; with, which error came back depended on what the caller had been doing.
+;
+; SETCBF above has already told GIOCOM that no buffer was reserved, and
+; nothing gets past the open, but the rest answer for themselves rather than
+; leave it to chance.
 @INICOM:
+        mov     ah, 3
+        ret
+
 @SNDCOM:
-@RECCOM:
-@STACOM:
 @TRMCOM:
+        xor     ah, ah
+        ret
+
+@RECCOM:
+        xor     ax, ax                  ; no error, and nothing to read
+        ret
+
+@STACOM:
+        xor     ah, ah
+        xor     cx, cx                  ; nothing queued, and no room for more
+        xor     dx, dx
         ret
 
 end if
